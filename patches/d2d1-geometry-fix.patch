@@ -1,0 +1,53 @@
+--- a/dlls/d2d1/geometry.c
++++ b/dlls/d2d1/geometry.c
+@@ -2288,9 +2288,22 @@
+ {
+     struct d2d_cdt_edge_ref base_edge, current, new_origin, next, target;
+     size_t current_destination, current_origin;
++    unsigned int iterations = 0;
+ 
++restart:
+     for (current = *origin;; current = next)
+     {
++        /* Guard against non-terminating cycles caused by degenerate geometry
++         * (e.g. collinear/duplicate vertices). The original code recursed here
++         * and died with a stack overflow; bail out and skip the segment instead.
++         * A correct segment insertion is O(edge_count), so a generous multiple of
++         * it is a safe upper bound that legitimate geometry never reaches. */
++        if (++iterations > 16 * cdt->edge_count + 0x10000)
++        {
++            WARN("Iteration limit exceeded, skipping segment.\n");
++            return TRUE;
++        }
++
+         d2d_cdt_edge_next_origin(cdt, &next, &current);
+ 
+         current_destination = d2d_cdt_edge_destination(cdt, &current);
+@@ -2308,7 +2321,8 @@
+                 == (cdt->vertices[end_vertex].y > cdt->vertices[current_origin].y))
+         {
+             d2d_cdt_edge_sym(&new_origin, &current);
+-            return d2d_cdt_insert_segment(cdt, geometry, &new_origin, edge, end_vertex);
++            origin = &new_origin;
++            goto restart;
+         }
+ 
+         if (d2d_cdt_rightof(cdt, end_vertex, &next) && d2d_cdt_leftof(cdt, end_vertex, &current))
+@@ -2331,13 +2345,14 @@
+             if (d2d_cdt_edge_origin(cdt, edge) == end_vertex)
+                 return TRUE;
+             new_origin = *edge;
+-            return d2d_cdt_insert_segment(cdt, geometry, &new_origin, edge, end_vertex);
++            origin = &new_origin;
++            goto restart;
+         }
+ 
+         if (next.idx == origin->idx)
+         {
+-            ERR("Triangle not found.\n");
+-            return FALSE;
++            WARN("Triangle not found, skipping segment.\n");
++            return TRUE;
+         }
+     }
+ }

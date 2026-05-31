@@ -86,4 +86,22 @@ Falls du auf Wine 12.x oder neuer upgradesd:
 - **Größe:** 5.8 MB
 - **Basis:** Wine Staging 11.9-1.1
 
-Diese DLL funktioniert nur mit Wine 11.9. Bei anderen Versionen muss neu kompiliert werden.
+## Versions-Kompatibilität
+
+| Wine-Version | Status | Hinweis |
+|--------------|--------|---------|
+| 11.9 | ✅ getestet | Original-Build, läuft produktiv |
+| 11.10 | ✅ verifiziert | **Upstream hat `d2d1` in 11.10 nicht verändert** – das gesamte `d2d1`-Verzeichnis ist identisch zu 11.9, einziger Unterschied ist dieser Patch. Die 11.9-DLL bleibt gültig; `d2d1-geometry-fix.patch` wendet sich byte-sauber auf den 11.10-Quellbaum an (verifiziert per MD5-Vergleich). |
+
+Bei einem Update auf **11.10** ist daher **kein Neu-Kompilieren nötig** – die vorhandene `d2d1.dll.patched` funktioniert weiter, da sie quellgleich ist.
+
+Erst bei einem größeren Wine-Upgrade, das tatsächlich Änderungen an `dlls/d2d1/` mitbringt, muss neu gebaut werden. Vorgehen zum Prüfen, ob sich etwas geändert hat:
+
+```bash
+# d2d1-Verzeichnis der neuen Version mit der alten vergleichen
+diff -rq wine-ALT/dlls/d2d1/ wine-NEU/dlls/d2d1/ \
+     --exclude="*.o" --exclude="*.dll" --exclude="Makefile" \
+     --exclude="version.res" --exclude="x86_64-windows"
+```
+
+Zeigt der Vergleich nur Unterschiede in `geometry.c` (= dein Patch), ist kein Rebuild nötig.
