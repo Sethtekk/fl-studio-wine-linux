@@ -1,0 +1,4 @@
+# Keine persönlichen Daten oder Wine-Prefixes
+*.log
+*.bak
+*~
