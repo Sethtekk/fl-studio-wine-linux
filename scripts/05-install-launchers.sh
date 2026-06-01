@@ -17,6 +17,8 @@ echo "=== Launchers und Desktop-Icons installieren ==="
 cat > "$HOME/start-flstudio.sh" <<LAUNCHER
 #!/bin/bash
 # FL Studio 2025 unter Wine – stabiler Start
+# d2d1.dll: gepatchte native Version (geometry.c CDT-Fix) in system32
+# Audio: WineASIO via PipeWire-JACK (pw-jack)
 export WINEPREFIX=$WINEPREFIX
 export WINEFSYNC=1
 export WINEESYNC=1
@@ -25,7 +27,9 @@ export STAGING_AUDIO_PERIOD=10000
 export __GL_THREADED_OPTIMIZATIONS=0
 export DXVK_CONFIG_FILE=$HOME/.config/dxvk/dxvk.conf
 export DXVK_ASYNC=1
-exec wine "$WINEPREFIX/drive_c/Program Files/Image-Line/FL Studio 2025/FL64.exe" "\$@"
+export PIPEWIRE_RUNTIME_DIR=/run/user/\$(id -u)
+export JACK_NO_AUDIO_RESERVATION=1
+exec pw-jack wine "$WINEPREFIX/drive_c/Program Files/Image-Line/FL Studio 2025/FL64.exe" "\$@"
 LAUNCHER
 chmod +x "$HOME/start-flstudio.sh"
 echo "[1/4] ~/start-flstudio.sh erstellt."

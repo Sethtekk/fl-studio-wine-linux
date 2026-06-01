@@ -135,7 +135,21 @@ Nach der Installation: FL Studio über den Launcher starten:
 ~/start-flstudio.sh
 ```
 
-### 7. Splice installieren (optional)
+### 7. WineASIO einrichten (empfohlen für Multi-Channel-Interfaces)
+
+Ohne WineASIO zeigt FL Studio nur 2 Eingänge (Wine WASAPI-Einschränkung). Mit WineASIO werden alle Kanäle deines Interfaces sichtbar.
+
+```bash
+sudo pacman -S wineasio
+bash scripts/07-setup-wineasio.sh
+systemctl --user restart pipewire pipewire-pulse wireplumber
+```
+
+Dann in FL Studio: `Options → Audio Settings → ASIO → WineASIO`.
+
+> **Hinweis:** Das Input-Monitoring-Symbol (grüner Lautsprecher) im Mixer deaktivieren um Rückkopplungen zu vermeiden.
+
+### 8. Splice installieren (optional)
 
 Splice wird für iZotope-Plugins (z.B. Ozone 11) und Sample-Downloads benötigt.
 
@@ -156,6 +170,7 @@ bash scripts/06-setup-splice.sh
 | `scripts/04-apply-d2d1-patch.sh` | Gepatchte d2d1.dll anwenden (Anti-Freeze-Fix) |
 | `scripts/05-install-launchers.sh` | Launcher-Scripts + Desktop-Icons installieren |
 | `scripts/06-setup-splice.sh` | Splice-Konfiguration reparieren |
+| `scripts/07-setup-wineasio.sh` | WineASIO einrichten (alle Interface-Eingänge) |
 | `scripts/restore-d2d1-patch.sh` | d2d1-Patch wiederherstellen (nach Wine-Update) |
 
 ---
@@ -171,6 +186,8 @@ Diese sind in den Launchers bereits gesetzt:
 | `STAGING_AUDIO_PERIOD` | `10000` | Audio-Latenz-Optimierung (10ms) |
 | `DXVK_ASYNC` | `1` | Asynchrone Shader-Kompilierung |
 | `__GL_THREADED_OPTIMIZATIONS` | `0` | Verhindert OpenGL-Threading-Konflikte |
+| `PIPEWIRE_RUNTIME_DIR` | `/run/user/1000` | PipeWire-Socket für WineASIO/JACK |
+| `JACK_NO_AUDIO_RESERVATION` | `1` | Verhindert JACK-Audiosystem-Reservierung |
 
 ---
 
@@ -227,9 +244,23 @@ rm -rf ~/.wine-flstudio/drive_c/users/$(whoami)/AppData/Local/SpliceSettings/Cod
 ~/start-splice.sh
 ```
 
-### Kein Sound in FL Studio
+### Kein Sound / nur 2 Eingänge in FL Studio
 
-In FL Studio: `Options → Audio Settings → Audio Device` → ASIO oder WASAPI wählen.
+Für alle Interface-Kanäle WineASIO verwenden:
+```bash
+bash scripts/07-setup-wineasio.sh
+systemctl --user restart pipewire pipewire-pulse wireplumber
+```
+Dann in FL Studio: `Options → Audio Settings → ASIO → WineASIO`.
+
+### Sample-Rate-Fehler beim Start (44100 Hz)
+
+PipeWire läuft standardmäßig auf 48000 Hz. Fix:
+```bash
+mkdir -p ~/.config/pipewire/pipewire.conf.d/
+# Datei 10-sample-rate.conf anlegen (wird von 07-setup-wineasio.sh automatisch erledigt)
+systemctl --user restart pipewire pipewire-pulse wireplumber
+```
 
 ---
 

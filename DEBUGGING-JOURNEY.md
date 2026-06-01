@@ -267,6 +267,103 @@ Nach diesen Fixes: Splice öffnet sich, zeigt eine Login-Seite, und Plugins kön
 
 ---
 
+---
+
+## Bonus 2: WineASIO – alle Eingänge des Audio-Interfaces in FL Studio
+
+### Problem
+
+FL Studio unter Wine zeigte beim Behringer UMC404HD (4 Eingänge) immer nur **2 Eingänge** — egal welcher ASIO-Treiber gewählt wurde.
+
+### Ursache: Wine WASAPI ist auf Stereo begrenzt
+
+Wine's eingebaute ASIO-Emulation ("FL Studio ASIO") nutzt intern WASAPI. Wine's WASAPI-Implementation gibt immer nur das Standard-Stereo-Paar zurück — das ist eine bekannte Einschränkung, keine Konfigurationssache.
+
+### Lösung: WineASIO + PipeWire-JACK
+
+WineASIO (`pacman -S wineasio`) ist ein Wine-Treiber, der direkt an JACK (hier: PipeWire's JACK-Kompatibilitätsschicht) andockt. Damit werden alle Hardware-Kanäle sichtbar.
+
+### Debugging-Verlauf
+
+**Schritt 1 — Registrierung fehlgeschlagen (lautlos)**
+
+```bash
+WINEPREFIX=... wine regsvr32 /s wineasio64.dll
+# Exit: 3 → Fehler, aber keine Fehlermeldung
+```
+
+Die DLL `wineasio64.dll` konnte nicht als COM-Objekt registriert werden. Grund noch unklar.
+
+**Schritt 2 — DLL-Ladevorgang mit Debug-Output verfolgt**
+
+```bash
+WINEDEBUG=+loaddll,+module wine regsvr32 /s wineasio64.dll 2>&1 | grep wineasio
+```
+
+Ausgabe:
+```
+looking for "wineasio.dll" for file "wineasio64.dll"
+cannot find builtin library for wineasio64.dll
+Failed to load module "wineasio64.dll"; status=c0000135
+```
+
+**Root Cause gefunden:** Der Wine-Stub `wineasio64.dll` (2 KB PE-Platzhalter) hat in seiner PE-Export-Tabelle intern den Namen `wineasio.dll` eingebaut. Wine liest diesen Namen und sucht deshalb nach `wineasio.dll.so` als Builtin-Library — diese existiert im `wineasio`-Paket aber nicht. Nur `wineasio64.dll.so` ist vorhanden. Das ist ein **Packaging-Bug** im wineasio-Paket.
+
+**Schritt 3 — Fix: Symlink erstellen**
+
+```bash
+sudo ln -s /usr/lib/wine/x86_64-unix/wineasio64.dll.so \
+           /usr/lib/wine/x86_64-unix/wineasio.dll.so
+```
+
+Danach lädt `wineasio64.dll` korrekt als Builtin:
+```
+Loaded "C:\windows\system32\wineasio64.dll" at 0x...: builtin  ✓
+```
+
+**Schritt 4 — Sample-Rate-Konflikt**
+
+Nach erfolgreichem Laden kam die nächste Fehlermeldung:
+```
+Warning: The needed sample rate (44100 Hz) couldn't be set or is not supported by the ASIO driver.
+```
+
+PipeWire lief auf 48000 Hz (Standard). WineASIO meldet FL Studio die JACK-Sample-Rate — Mismatch.
+
+Fix: PipeWire User-Config anlegen:
+
+```bash
+mkdir -p ~/.config/pipewire/pipewire.conf.d/
+cat > ~/.config/pipewire/pipewire.conf.d/10-sample-rate.conf << 'EOF'
+context.properties = {
+    default.clock.rate          = 44100
+    default.clock.allowed-rates = [ 44100 48000 ]
+    default.clock.quantum       = 1024
+    default.clock.min-quantum   = 32
+    default.clock.max-quantum   = 2048
+}
+EOF
+systemctl --user restart pipewire pipewire-pulse wireplumber
+```
+
+**Schritt 5 — Launcher anpassen**
+
+FL Studio muss über `pw-jack` gestartet werden, damit der Wine-Prozess im PipeWire-JACK-Kontext läuft:
+
+```bash
+export PIPEWIRE_RUNTIME_DIR=/run/user/$(id -u)
+export JACK_NO_AUDIO_RESERVATION=1
+exec pw-jack wine "FL64.exe"
+```
+
+### Ergebnis
+
+Nach allen Fixes: WineASIO wird in FL Studio unter `Options → Audio Settings → ASIO` angezeigt, alle 4 Eingänge des UMC404HD sind sichtbar und verwendbar.
+
+**Wichtig:** Das grüne **Input-Monitoring-Symbol** im FL Studio Mixer deaktivieren, um Rückkopplungen zu vermeiden. Das ist kein Wine-Bug — identisches Verhalten wie auf Windows.
+
+---
+
 ## Zusammenfassung
 
 | Schicht | Problem | Fix |
@@ -276,6 +373,9 @@ Nach diesen Fixes: Splice öffnet sich, zeigt eine Login-Seite, und Plugins kön
 | Splice | Conveyor-Migration hängt unter Wine | `upgradeState = null` in appState.json |
 | Splice | Service Worker Cache korrumpiert | Cache-Verzeichnisse löschen |
 | Splice | Auth-Token abgelaufen | Einmalig neu einloggen |
+| WineASIO | wineasio64.dll lädt nicht (Packaging-Bug) | Symlink wineasio.dll.so → wineasio64.dll.so |
+| WineASIO | Sample-Rate-Mismatch (48000 vs 44100 Hz) | PipeWire User-Config auf 44100 Hz |
+| WineASIO | Nur 2 Inputs sichtbar (WASAPI-Limit) | WineASIO + pw-jack statt FL Studio ASIO |
 
 ### Was wir gelernt haben
 
@@ -284,6 +384,8 @@ Nach diesen Fixes: Splice öffnet sich, zeigt eine Login-Seite, und Plugins kön
 - **Wine lädt Prefix-DLLs nicht automatisch** wenn die Builtin-Signatur vorhanden ist — die muss aktiv entfernt werden
 - **Electron-Apps unter Wine** haben oft GPU-Initialisierungsprobleme, aber das ist meistens nicht das eigentliche Problem — Caches und Auth-State sind häufiger schuld
 - **Audio läuft weiter beim Freeze** = Main-Thread hängt, Audio-Threads laufen → präzisiert die Suche enorm
+- **Wine DLL-Stubs** haben einen internen PE-Namen der von dem Dateinamen abweichen kann — `WINEDEBUG=+module` deckt solche Ladefehler auf, die sonst lautlos scheitern
+- **WASAPI unter Wine** ist auf Stereo begrenzt — für Multi-Channel-Interfaces WineASIO + JACK/PipeWire verwenden
 
 ---
 
