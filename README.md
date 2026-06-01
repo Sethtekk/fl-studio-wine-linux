@@ -149,6 +149,45 @@ Dann in FL Studio: `Options → Audio Settings → ASIO → WineASIO`.
 
 > **Hinweis:** Das Input-Monitoring-Symbol (grüner Lautsprecher) im Mixer deaktivieren um Rückkopplungen zu vermeiden.
 
+#### USB-Webcam-Mikrofon von WineASIO ausschließen
+
+Wenn neben dem Audio-Interface noch ein USB-Webcam-Mikrofon angeschlossen ist (z.B. Logitech Brio), verbindet WineASIO es automatisch als Input 1 — noch vor den Interface-Kanälen. Ursache: `Connect to hardware = 1` verbindet sich mit **allen** physischen JACK-Capture-Ports.
+
+Fix: dem Webcam-Mikrofon die `node.physical`-Eigenschaft entziehen. WineASIO ignoriert dann den Port beim Auto-Connect, PipeWire/andere Apps können das Mikrofon weiterhin normal nutzen.
+
+```bash
+mkdir -p ~/.config/wireplumber/wireplumber.conf.d/
+
+# Gerätename anpassen — eigenen Namen ermitteln:
+pw-link -o | grep -i <webcam-name>
+
+cat > ~/.config/wireplumber/wireplumber.conf.d/51-webcam-not-physical.conf << 'EOF'
+monitor.alsa.rules = [
+  {
+    matches = [
+      {
+        node.name = "~alsa_input.usb-046d_Brio_100.*"
+      }
+    ]
+    actions = {
+      update-props = {
+        node.physical = false
+      }
+    }
+  }
+]
+EOF
+
+systemctl --user restart wireplumber
+```
+
+Überprüfen ob die Eigenschaft gesetzt wurde:
+```bash
+# Node-ID aus wpctl status ablesen, dann:
+wpctl inspect <ID> | grep node.physical
+# Erwartete Ausgabe: node.physical = "false"
+```
+
 ### 8. Splice installieren (optional)
 
 Splice wird für iZotope-Plugins (z.B. Ozone 11) und Sample-Downloads benötigt.
@@ -252,6 +291,10 @@ bash scripts/07-setup-wineasio.sh
 systemctl --user restart pipewire pipewire-pulse wireplumber
 ```
 Dann in FL Studio: `Options → Audio Settings → ASIO → WineASIO`.
+
+### Webcam-Mikrofon belegt Input 1 in FL Studio
+
+WineASIO verbindet sich automatisch mit **allen** physischen JACK-Capture-Ports — auch USB-Webcam-Mikrofonen. Fix: WirePlumber-Regel `node.physical = false` für das Webcam-Gerät setzen (siehe Schritt 7 oben).
 
 ### Sample-Rate-Fehler beim Start (44100 Hz)
 
