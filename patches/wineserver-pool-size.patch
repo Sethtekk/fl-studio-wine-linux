@@ -1,0 +1,11 @@
+--- a/server/mapping.c
++++ b/server/mapping.c
+@@ -1425,7 +1425,7 @@
+                                         unsigned int attr, const struct security_descriptor *sd )
+ {
+     static const unsigned int access = FILE_READ_DATA | FILE_WRITE_DATA;
+-    size_t size = max( sizeof(*shared_session) + sizeof(object_shm_t) * 512, 0x10000 );
++    size_t size = max( sizeof(*shared_session) + sizeof(object_shm_t) * 32768, 0x10000 );
+ 
+     size = round_size( size, host_page_mask );
+     return create_mapping( root, name, attr, size, SEC_COMMIT, 0, access, sd );

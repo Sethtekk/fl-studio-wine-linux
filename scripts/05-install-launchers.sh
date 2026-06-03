@@ -29,6 +29,12 @@ export DXVK_CONFIG_FILE=$HOME/.config/dxvk/dxvk.conf
 export DXVK_ASYNC=1
 export PIPEWIRE_RUNTIME_DIR=/run/user/\$(id -u)
 export JACK_NO_AUDIO_RESERVATION=1
+# Pool-Fix-Waechter: /usr/bin/wineserver muss die gepatchte Version sein (Pool 512->32768),
+# sonst Fehler 1411 "Klasse existiert nicht" bei grossen Projekten. wine-Update ueberschreibt ihn.
+if [ "\$(md5sum /usr/bin/wineserver 2>/dev/null | cut -d' ' -f1)" != "da13506f620709fb5dab7d11186c6a93" ]; then
+    echo "WARNUNG: /usr/bin/wineserver ist NICHT der Pool-Fix (wine-Update?). Fehler 1411 droht."
+    echo "  -> erneut einspielen: bash scripts/08-apply-wineserver-poolfix.sh"
+fi
 exec pw-jack wine "$WINEPREFIX/drive_c/Program Files/Image-Line/FL Studio 2025/FL64.exe" "\$@"
 LAUNCHER
 chmod +x "$HOME/start-flstudio.sh"

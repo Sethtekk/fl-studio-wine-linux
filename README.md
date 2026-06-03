@@ -12,6 +12,8 @@ FL Studio friert ohne diese Anleitung beim Öffnen von Plugins (z.B. Serum 2) ko
 
 **Fix:** Eine neu kompilierte, gepatchte Version von `d2d1.dll` aus dem Wine-Quellbaum, bei der die Rekursion durch eine Iteration ersetzt wurde.
 
+Zusätzlich bricht FL bei **großen Projekten** mit `System Error. Code: 1411. Klasse existiert nicht` ab — Ursache: Wines Shared-Session-Pool (512 Objekte) ist erschöpft. **Fix:** ein gepatchter `wineserver` mit größerem Pool (siehe Schritt 4b).
+
 ---
 
 ## Voraussetzungen
@@ -41,6 +43,9 @@ bash scripts/03-install-dxvk.sh
 
 # Schritt 4: d2d1-Patch anwenden (WICHTIG: verhindert FL-Freeze)
 bash scripts/04-apply-d2d1-patch.sh
+
+# Schritt 4b: wineserver Pool-Fix (WICHTIG: verhindert Fehler 1411)
+bash scripts/08-apply-wineserver-poolfix.sh
 
 # Schritt 5: Launcher-Scripts installieren
 bash scripts/05-install-launchers.sh
@@ -111,6 +116,18 @@ Der Patch tut folgendes:
 **Was wurde im Quellcode geändert?**
 
 In `dlls/d2d1/geometry.c`, Funktion `d2d_cdt_insert_segment` (CDT = Constrained Delaunay Triangulation): Die ursprüngliche Implementierung rief sich selbst rekursiv auf, was bei Plugin-GUIs mit komplexen Geometrien zu einem Stack-Overflow führte. Der Fix ersetzt die Rekursion durch eine `goto`-basierte Iteration mit einem Sicherheitslimit.
+
+### 4b. wineserver Pool-Fix anwenden ⚠️
+
+**Ebenfalls zwingend für große Projekte** — ohne ihn bricht FL bei vielen Tracks/Plugins mit `System Error. Code: 1411. Klasse existiert nicht` ab (oder hängt beim Projektwechsel).
+
+```bash
+bash scripts/08-apply-wineserver-poolfix.sh
+```
+
+Wine legt Fenster, Fensterklassen und Message-Queues in einem gemeinsamen „shared session"-Speicher ab, der initial nur **512 Objekte** fasst. Große FL-Projekte sprengen das. Der Fix ersetzt `/usr/bin/wineserver` durch eine Version mit Pool **32768** (`server/mapping.c`, Patch in `patches/wineserver-pool-size.patch`).
+
+> ⚠️ **Jedes `wine-staging`-Update überschreibt `/usr/bin/wineserver`** → danach `bash scripts/08-apply-wineserver-poolfix.sh` erneut ausführen. Der FL-Launcher warnt beim Start, wenn der Fix fehlt. Details: [`patches/wineserver-pool-size.md`](patches/wineserver-pool-size.md).
 
 ### 5. Launcher installieren
 
@@ -210,6 +227,7 @@ bash scripts/06-setup-splice.sh
 | `scripts/05-install-launchers.sh` | Launcher-Scripts + Desktop-Icons installieren |
 | `scripts/06-setup-splice.sh` | Splice-Konfiguration reparieren |
 | `scripts/07-setup-wineasio.sh` | WineASIO einrichten (alle Interface-Eingänge) |
+| `scripts/08-apply-wineserver-poolfix.sh` | wineserver Pool-Fix einspielen (Anti-1411-Fix) |
 | `scripts/restore-d2d1-patch.sh` | d2d1-Patch wiederherstellen (nach Wine-Update) |
 
 ---
@@ -234,7 +252,13 @@ Diese sind in den Launchers bereits gesetzt:
 
 ### Wine-Updates (normale pacman -Syu)
 
-**Sicher** — der Patch liegt im WINEPREFIX (`system32/d2d1.dll`), nicht im System-Wine. `pacman -Syu` überschreibt nur `/usr/lib/wine/...`, nicht das Prefix.
+**d2d1-Patch: sicher** — er liegt im WINEPREFIX (`system32/d2d1.dll`), nicht im System-Wine. `pacman -Syu` überschreibt nur `/usr/lib/wine/...`, nicht das Prefix.
+
+**wineserver Pool-Fix: NICHT sicher** ⚠️ — er liegt in `/usr/bin/wineserver` und wird von jedem `wine-staging`-Update überschrieben. Danach erneut einspielen:
+```bash
+bash scripts/08-apply-wineserver-poolfix.sh
+```
+Der FL-Launcher warnt beim Start, falls der Fix fehlt.
 
 ### Wine-Major-Upgrade (z.B. 11.x → 12.x)
 
@@ -266,6 +290,16 @@ Dann prüfen ob die gepatchte d2d1.dll noch da ist:
 ```bash
 bash scripts/restore-d2d1-patch.sh
 ```
+
+### Fehler 1411 „Klasse existiert nicht" (oder Hänger beim Projektwechsel)
+
+Tritt bei großen Projekten auf, wenn der Wine Shared-Session-Pool (512 Objekte) erschöpft ist. Pool-Fix (erneut) einspielen — meist nach einem `wine-staging`-Update nötig:
+```bash
+bash scripts/08-apply-wineserver-poolfix.sh
+# Verifizieren:
+md5sum /usr/bin/wineserver   # soll: da13506f620709fb5dab7d11186c6a93
+```
+Hintergrund & Diagnose: [`patches/wineserver-pool-size.md`](patches/wineserver-pool-size.md).
 
 ### Splice öffnet sich nicht
 
