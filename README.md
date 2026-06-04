@@ -339,6 +339,53 @@ mkdir -p ~/.config/pipewire/pipewire.conf.d/
 systemctl --user restart pipewire pipewire-pulse wireplumber
 ```
 
+### Wiedergabe läuft um einen festen Faktor zu langsam ODER zu schnell (gleiche Tonhöhe)
+
+Symptom: Ein 3-Sekunden-Sample braucht z. B. 12 Sekunden (Faktor 4 zu langsam) – oder
+umgekehrt viel zu schnell. **Tonhöhe bleibt korrekt** (kein Down-/Up-Pitch). Betrifft
+Projekt-Wiedergabe *und* Browser-Vorschau. Der Faktor kann sich zwischen FL-Starts ändern.
+
+Ursache: Der **WineASIO-Buffer** und das **PipeWire-Quantum** stimmen nicht überein.
+WineASIO arbeitet mit festen Buffern (`UseFixedBuffers=1`, `bufferSize`) und meldet FL diese
+feste Größe. Der PipeWire-Graph ist aber nicht stabil auf demselben Wert:
+- Das Interface kann ein größeres Quantum erzwingen (z. B. UMC404HD: `api.alsa.period-size = 2048`)
+  → **Quantum ÷ Buffer** zu groß → zu **langsam** (2048 ÷ 512 = 4).
+- Nach einer Renegotiation kann FL das Quantum nach unten ziehen (z. B. 128)
+  → **Buffer ÷ Quantum** zu groß → zu **schnell** (512 ÷ 128 = 4).
+- Zusätzlich flippt die Rate zwischen 44100/48000, wenn beide in `allowed-rates` stehen.
+
+FL rastet beim Start auf den *gerade aktuellen* Graph-Wert ein – jeder wackelnde Wert = Mismatch.
+
+Diagnose:
+```bash
+pw-top -b -n 4                     # Spalten RATE und QUANT am Treiber-Node (= Interface)
+grep -i bufferSize "$WINEPREFIX/user.reg"   # WineASIO-Buffer
+```
+Abgrenzung: **gleiche Tonhöhe** = Quantum/Buffer-Mismatch (oder FL-Time-Stretch).
+**Tiefere/höhere Tonhöhe** = echtes Sample-Rate-/Clock-Problem.
+
+Fix (dauerhaft, separate Datei – die `10-sample-rate.conf` NICHT anfassen). Rate **und**
+Quantum **hart** fixieren, damit der Graph nicht mehr wackelt (ein bloßer `max-quantum`-Deckel
+reicht nicht, FL zieht darunter):
+```bash
+cat > ~/.config/pipewire/pipewire.conf.d/20-wineasio-quantum.conf << 'EOF'
+# force-quantum MUSS == WineASIO-Buffer sein (ASIO 256 -> 256, 512 -> 512, ...)
+context.properties = {
+    default.clock.rate          = 44100
+    default.clock.quantum       = 512
+    default.clock.force-rate    = 44100
+    default.clock.force-quantum = 512
+}
+EOF
+systemctl --user restart pipewire pipewire-pulse wireplumber
+```
+Reversibler Sofort-Test ohne Neustart:
+```bash
+pw-metadata -n settings 0 clock.force-quantum 512   # 0 = aufheben
+pw-metadata -n settings 0 clock.force-rate    44100 # 0 = aufheben
+```
+Selbstcheck nach Reboot: `pw-metadata -n settings | grep force` → muss 512 und 44100 zeigen.
+
 ---
 
 ## System-Informationen (Referenz-Setup)
