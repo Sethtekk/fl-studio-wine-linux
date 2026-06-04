@@ -52,7 +52,63 @@ export WINEDEBUG=-all
 exec wine "$WINEPREFIX/drive_c/users/$WINE_USER/AppData/Local/splice/Splice.exe"
 LAUNCHER
 chmod +x "$HOME/start-splice.sh"
-echo "[2/4] ~/start-splice.sh erstellt."
+echo "[2/5] ~/start-splice.sh erstellt."
+
+# ── Splice-Reparatur-Script (Conveyor-Migration-Haenger) ─────
+# Quoted Heredoc -> innerer Python-Heredoc bleibt literal; Pfade per sed ersetzt.
+cat > "$HOME/fix-splice.sh" <<'FIXEOF'
+#!/bin/bash
+# fix-splice.sh - behebt den haengenden Splice-Start (Conveyor-Migration unter Wine)
+# Symptom: Splice "startet nicht" -> unsichtbare Zombie-Prozesse ohne Fenster.
+# Fix: in appState.json upgradeState=null UND conveyorMigration.isComplete=true, dann neu starten.
+#   ./fix-splice.sh            -> Fix anwenden und Splice starten
+#   ./fix-splice.sh --no-start -> nur Fix anwenden
+set -u
+APPSTATE="__WINEPREFIX__/drive_c/users/__WINE_USER__/AppData/Local/SpliceSettings/appState.json"
+LAUNCHER="$HOME/start-splice.sh"
+
+echo "== Splice-Fix =="
+echo "-> beende laufende/haengende Splice-Prozesse ..."
+pkill -9 -f 'Local\\splice\\' 2>/dev/null
+sleep 1
+
+if [ ! -f "$APPSTATE" ]; then
+    echo "FEHLER: appState.json nicht gefunden: $APPSTATE"
+    exit 1
+fi
+BAK="${APPSTATE}.bak-$(date +%Y%m%d-%H%M%S)"
+cp "$APPSTATE" "$BAK" && echo "-> Backup: $BAK"
+
+echo "-> setze upgradeState=null und conveyorMigration.isComplete=true ..."
+python3 - "$APPSTATE" <<'PY'
+import json, sys
+p = sys.argv[1]
+with open(p, encoding="utf-8") as f:
+    d = json.load(f)
+d["upgradeState"] = None
+cm = d.get("conveyorMigration")
+if isinstance(cm, dict):
+    cm["isComplete"] = True
+else:
+    d["conveyorMigration"] = {"isComplete": True}
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(d, f, ensure_ascii=False, separators=(",", ":"))
+print("   ok.")
+PY
+if [ $? -ne 0 ]; then
+    echo "FEHLER beim Patchen - stelle Backup wieder her."; cp "$BAK" "$APPSTATE"; exit 1
+fi
+
+if [ "${1:-}" = "--no-start" ]; then
+    echo "Fertig (kein Start angefordert). Starten mit: $LAUNCHER"; exit 0
+fi
+echo "-> starte Splice ..."
+nohup bash "$LAUNCHER" >/dev/null 2>&1 &
+echo "   gestartet. Fenster sollte in ~5-15 s erscheinen."
+FIXEOF
+sed -i -e "s|__WINEPREFIX__|$WINEPREFIX|g" -e "s|__WINE_USER__|$WINE_USER|g" "$HOME/fix-splice.sh"
+chmod +x "$HOME/fix-splice.sh"
+echo "[3/5] ~/fix-splice.sh erstellt."
 
 # ── Icons konvertieren ───────────────────────────────────────
 # FL Studio Icon
@@ -63,13 +119,19 @@ if [ -f "$WINEPREFIX/drive_c/Program Files/Image-Line/FL Studio 2025/FL64.exe" ]
     cp "$REPO_DIR/assets/fl-studio-placeholder.png" "$ICONS_DIR/fl-studio.png" 2>/dev/null || true
 fi
 
-# Splice Icon
+# Splice Icon (Original)
 if [ -f "$WINEPREFIX/drive_c/users/$WINE_USER/AppData/Local/splice/app.ico" ]; then
     magick "$WINEPREFIX/drive_c/users/$WINE_USER/AppData/Local/splice/app.ico[4]" \
         -resize 128x128 "$ICONS_DIR/splice.png" 2>/dev/null || true
 fi
 
-echo "[3/4] Icons konvertiert."
+# Splice Icon (abgewandelt, fuer den Reparatur-Launcher) - aus mitgeliefertem Asset
+if [ -f "$REPO_DIR/assets/splice-fix.png" ]; then
+    magick "$REPO_DIR/assets/splice-fix.png" -resize 128x128 "$ICONS_DIR/splice-fix.png" 2>/dev/null \
+        || cp "$REPO_DIR/assets/splice-fix.png" "$ICONS_DIR/splice-fix.png"
+fi
+
+echo "[4/5] Icons konvertiert."
 
 # ── Desktop-Einträge ─────────────────────────────────────────
 cat > "$APPS_DIR/fl-studio-wine.desktop" <<DESKTOP
@@ -102,12 +164,28 @@ StartupNotify=true
 StartupWMClass=splice.exe
 DESKTOP
 
+cat > "$APPS_DIR/splice-fix-wine.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Splice reparieren (Wine)
+GenericName=Music Production
+Comment=Behebt den haengenden Splice-Start (Conveyor-Migration) und startet Splice
+Exec=$HOME/fix-splice.sh
+Icon=$ICONS_DIR/splice-fix.png
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+StartupNotify=true
+StartupWMClass=splice.exe
+DESKTOP
+
 # Desktop-Datenbank aktualisieren
 update-desktop-database "$APPS_DIR" 2>/dev/null || true
 kbuildsycoca6 2>/dev/null || true
 
-echo "[4/4] Desktop-Einträge für KDE registriert."
+echo "[5/5] Desktop-Einträge für KDE registriert."
 echo ""
 echo "=== Fertig! ==="
-echo "Starte FL Studio: ~/start-flstudio.sh"
-echo "Starte Splice:    ~/start-splice.sh"
+echo "Starte FL Studio:     ~/start-flstudio.sh"
+echo "Starte Splice:        ~/start-splice.sh"
+echo "Splice reparieren:    ~/fix-splice.sh  (Launcher 'Splice reparieren')"
