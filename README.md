@@ -125,8 +125,10 @@ In `dlls/d2d1/geometry.c`, Funktion `d2d_cdt_insert_segment` (CDT = Constrained 
 bash scripts/08-apply-wineserver-poolfix.sh
 ```
 
-Wine legt Fenster, Fensterklassen und Message-Queues in einem gemeinsamen „shared session"-Speicher ab, der initial nur **512 Objekte** fasst. Große FL-Projekte sprengen das. Der Fix ersetzt `/usr/bin/wineserver` durch eine Version mit Pool **32768** (`server/mapping.c`, Patch in `patches/wineserver-pool-size.patch`).
+Wine legt Fenster, Fensterklassen und Message-Queues in einem gemeinsamen „shared session"-Speicher ab, der initial nur **512 Objekte** fasst. Große FL-Projekte sprengen das. Der Fix ersetzt `/usr/bin/wineserver` durch eine Version mit Pool **32768** (`server/mapping.c`, Patch in `patches/wineserver-pool-size.patch`). Das Script erkennt die installierte Wine-Version und spielt das passende Binary ein (**11.9** und **11.10-Staging** liegen vorgebaut bei).
 
+> ⚠️ **Pro Wine-Version ein eigenes Binary** (Server-Protokoll!): wine-staging **11.10 = Protokoll 943**, 11.9 = 942. Ein unpassendes Binary gibt `wine client error:0: version mismatch`. Das 11.10-Binary muss aus den **wine-staging-Quellen** gebaut sein.
+>
 > ⚠️ **Jedes `wine-staging`-Update überschreibt `/usr/bin/wineserver`** → danach `bash scripts/08-apply-wineserver-poolfix.sh` erneut ausführen. Der FL-Launcher warnt beim Start, wenn der Fix fehlt. Details: [`patches/wineserver-pool-size.md`](patches/wineserver-pool-size.md).
 
 ### 5. Launcher installieren
@@ -296,9 +298,14 @@ bash scripts/restore-d2d1-patch.sh
 Tritt bei großen Projekten auf, wenn der Wine Shared-Session-Pool (512 Objekte) erschöpft ist. Pool-Fix (erneut) einspielen — meist nach einem `wine-staging`-Update nötig:
 ```bash
 bash scripts/08-apply-wineserver-poolfix.sh
-# Verifizieren:
-md5sum /usr/bin/wineserver   # soll: da13506f620709fb5dab7d11186c6a93
+# Verifizieren (Soll-MD5 je nach Wine-Version):
+md5sum /usr/bin/wineserver
+#   Wine 11.9          -> da13506f620709fb5dab7d11186c6a93
+#   wine-staging 11.10 -> 2cd976da97a88f0d4f9cba592fe18d3f
 ```
+Startet FL nach einem Update gar nicht mehr mit `wine client error:0: version mismatch 942/943`,
+ist das eingespielte Binary für die falsche Wine-Version → Script erneut ausführen (wählt jetzt automatisch das richtige).
+
 Hintergrund & Diagnose: [`patches/wineserver-pool-size.md`](patches/wineserver-pool-size.md).
 
 ### Splice öffnet sich nicht

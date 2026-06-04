@@ -11,6 +11,11 @@
 # DIE LOESUNG: Ein vorkompilierter wineserver mit Pool=32768
 # ersetzt /usr/bin/wineserver. Details: patches/wineserver-pool-size.md
 #
+# WICHTIG: Pro Wine-Version ein eigenes Binary (Server-Protokoll!).
+# wine-staging 11.10 = Protokoll 943, 11.9 = 942. Ein unpassendes
+# Binary gibt "wine client error:0: version mismatch". Dieses Script
+# erkennt die installierte Version und waehlt das richtige Binary.
+#
 # ACHTUNG: Jedes wine-staging-Update ueberschreibt
 # /usr/bin/wineserver -> dieses Script danach erneut ausfuehren.
 # ============================================================
@@ -18,11 +23,33 @@ set -e
 source "$(dirname "$0")/config.sh"
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-POOLFIX="$REPO_DIR/assets/wineserver-poolfix"
-EXPECTED_MD5=da13506f620709fb5dab7d11186c6a93
 TARGET=/usr/bin/wineserver
 
+# --- Wine-Version erkennen (z.B. "wine-11.10 (Staging)" -> 11.10) ---
+WV_RAW="$(wine --version 2>/dev/null || true)"
+WV="$(printf '%s' "$WV_RAW" | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+
 echo "=== wineserver Pool-Fix anwenden ==="
+echo "[i] Installierte Wine-Version: ${WV_RAW:-unbekannt} (erkannt: ${WV:-?})"
+
+# --- passendes Binary + MD5 zur Version waehlen ---
+case "$WV" in
+    11.9)
+        POOLFIX="$REPO_DIR/assets/wineserver-poolfix"
+        EXPECTED_MD5=da13506f620709fb5dab7d11186c6a93
+        ;;
+    11.10)
+        POOLFIX="$REPO_DIR/assets/wineserver-poolfix-11.10-staging"
+        EXPECTED_MD5=2cd976da97a88f0d4f9cba592fe18d3f
+        ;;
+    *)
+        echo "FEHLER: Fuer Wine '${WV_RAW:-?}' liegt kein vorgebautes Pool-Fix-Binary bei."
+        echo "        Vorhanden: 11.9, 11.10 (Staging). Neu bauen: patches/wineserver-pool-size.md (Variante B)."
+        exit 1
+        ;;
+esac
+
+echo "[i] Passendes Binary: $(basename "$POOLFIX") (MD5 $EXPECTED_MD5)"
 
 if [ ! -f "$POOLFIX" ]; then
     echo "FEHLER: $POOLFIX nicht gefunden! Repository vollstaendig geklont?"
@@ -30,13 +57,13 @@ if [ ! -f "$POOLFIX" ]; then
 fi
 
 if [ "$(md5sum "$POOLFIX" | cut -d' ' -f1)" != "$EXPECTED_MD5" ]; then
-    echo "FEHLER: assets/wineserver-poolfix hat unerwarteten MD5 – Abbruch."
+    echo "FEHLER: $(basename "$POOLFIX") hat unerwarteten MD5 – Abbruch."
     exit 1
 fi
 
 # Schon aktuell?
 if [ "$(md5sum "$TARGET" 2>/dev/null | cut -d' ' -f1)" = "$EXPECTED_MD5" ]; then
-    echo "[i] $TARGET ist bereits der Pool-Fix – nichts zu tun."
+    echo "[i] $TARGET ist bereits der passende Pool-Fix – nichts zu tun."
     exit 0
 fi
 

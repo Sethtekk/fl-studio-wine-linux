@@ -36,6 +36,8 @@ Pool von **512 → 32768** Objekten. Damit reicht der initial gemappte Bereich a
 
 ## Anwenden / Neu bauen
 
+### Variante A – Vanilla Wine (z. B. exakt 11.9)
+
 ```bash
 # Wine-Quellcode zur passenden Version holen
 wget https://dl.winehq.org/wine/source/11.x/wine-11.9.tar.xz
@@ -51,23 +53,75 @@ make -j$(nproc) server/wineserver
 # Ergebnis liegt in server/wineserver
 ```
 
-## Die vorkompilierte Binary
+### Variante B – wine-staging (PFLICHT für 11.10, Protokoll 943)
 
-`assets/wineserver-poolfix` ist der für **Wine 11.9, x86_64** gebaute, gestrippte wineserver mit Pool=32768.
-- **MD5:** `da13506f620709fb5dab7d11186c6a93`
-- **Größe:** ~756 KB
-- **Basis:** Wine Staging 11.9-1.1
+Da auf CachyOS **wine-staging** installiert ist, muss der wineserver ab 11.10 aus den
+Staging-Quellen gebaut werden (sonst Protokoll-Mismatch). Erst Staging-Patches anwenden,
+**dann** den Pool-Patch:
 
-Einspielen erledigt `scripts/08-apply-wineserver-poolfix.sh` (kopiert nach `/usr/bin/wineserver`, Backup als `/usr/bin/wineserver.orig`).
+```bash
+# Vanilla-Tarball + passende wine-staging-Quellen (gleiche Version!)
+wget https://dl.winehq.org/wine/source/11.x/wine-11.10.tar.xz
+tar xf wine-11.10.tar.xz
+git clone --branch v11.10 --depth 1 https://gitlab.winehq.org/wine/wine-staging.git wine-staging-src
+
+# 1) Staging-Patches in den Wine-Baum spielen (bringt Protokoll auf 943)
+python3 wine-staging-src/staging/patchinstall.py --all --source-dir wine-11.10
+
+# 2) DANACH den Pool-Patch anwenden
+cd wine-11.10
+patch -p1 < /pfad/zu/patches/wineserver-pool-size.patch
+
+# 3) Out-of-tree nur den wineserver bauen
+cd .. && mkdir build-11.10 && cd build-11.10
+../wine-11.10/configure --prefix=/usr --enable-win64 --with-vulkan
+make -j$(nproc) server/wineserver
+strip server/wineserver        # ~5,1M -> ~767k
+
+# Verifizieren, dass Protokoll 943 drinsteht:
+strings server/wineserver | grep -i "protocol" | head
+```
+
+## Die vorkompilierten Binaries
+
+> ⚠️ **Pro Wine-Version ein eigenes Binary!** Der wineserver muss exakt zur installierten
+> Wine-Version passen, sonst: `wine client error:0: version mismatch`. Ein altes Binary
+> drüberkopieren funktioniert NICHT.
+
+| Datei | Wine-Version | MD5 | Server-Protokoll |
+|---|---|---|---|
+| `assets/wineserver-poolfix` | Wine **Staging 11.9**-1.1, x86_64 | `da13506f620709fb5dab7d11186c6a93` | 942 |
+| `assets/wineserver-poolfix-11.10-staging` | Wine **Staging 11.10**-1.1, x86_64 | `2cd976da97a88f0d4f9cba592fe18d3f` | 943 |
+
+Beide ~756 KB, gestrippt, Pool=32768.
+
+### ⚠️ Protokoll-Falle bei 11.10 (wichtig!)
+
+Wine-**Staging** 11.10 benutzt Server-Protokoll **943**, *vanilla* Wine 11.10 nur **942**.
+Ein aus den **Vanilla**-Quellen gebauter 11.10-wineserver gibt gegen die installierten
+Staging-Libs `wine client error:0: version mismatch 942/943` → FL startet nicht.
+Das 11.10-Binary muss daher aus den **wine-staging-Quellen** gebaut werden (siehe unten).
+
+Einspielen erledigt `scripts/08-apply-wineserver-poolfix.sh` — das Script erkennt die
+installierte Wine-Version selbst und wählt das passende Binary (kopiert nach
+`/usr/bin/wineserver`, Backup als `/usr/bin/wineserver.orig`).
 
 ## ⚠️ Update-Sicherheit (WICHTIG)
 
 `WINESERVER` als Umgebungsvariable **funktioniert auf Arch/CachyOS nicht** — Wine startet immer das fest verdrahtete `/usr/bin/wineserver`. Es gibt auch **keine** Registry-/Config-Option für die Pool-Größe (sie ist einkompiliert). Deshalb muss `/usr/bin/wineserver` direkt ersetzt werden.
 
-**Jedes `wine-staging`-Update überschreibt `/usr/bin/wineserver`** → der Fix ist dann weg und Fehler 1411 kommt zurück. Nach jedem Wine-Update neu einspielen:
+**Jedes `wine-staging`-Update überschreibt `/usr/bin/wineserver`** → der Fix ist dann weg und Fehler 1411 kommt zurück. Nach jedem Wine-Update neu einspielen — am einfachsten per Script (wählt automatisch das zur Version passende Binary):
 
 ```bash
-sudo cp assets/wineserver-poolfix /usr/bin/wineserver
+bash scripts/08-apply-wineserver-poolfix.sh
+```
+
+Oder manuell das **zur installierten Version passende** Binary:
+
+```bash
+# wine --version pruefen!
+sudo cp assets/wineserver-poolfix               /usr/bin/wineserver   # Wine 11.9
+sudo cp assets/wineserver-poolfix-11.10-staging /usr/bin/wineserver   # wine-staging 11.10
 ```
 
 Der Launcher `start-flstudio.sh` enthält einen md5-Wächter, der beim Start warnt, falls `/usr/bin/wineserver` nicht (mehr) die Pool-Version ist.
