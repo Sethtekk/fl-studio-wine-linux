@@ -42,9 +42,17 @@ case "$WV" in
         POOLFIX="$REPO_DIR/assets/wineserver-poolfix-11.10-staging"
         EXPECTED_MD5=2cd976da97a88f0d4f9cba592fe18d3f
         ;;
+    11.11)
+        POOLFIX="$REPO_DIR/assets/wineserver-poolfix-11.11-staging"
+        EXPECTED_MD5=337819d33dfaf98620be030a24626163
+        ;;
+    11.12)
+        POOLFIX="$REPO_DIR/assets/wineserver-poolfix-11.12-staging"
+        EXPECTED_MD5=6919781269e83923d784e28a2234a750
+        ;;
     *)
         echo "FEHLER: Fuer Wine '${WV_RAW:-?}' liegt kein vorgebautes Pool-Fix-Binary bei."
-        echo "        Vorhanden: 11.9, 11.10 (Staging). Neu bauen: patches/wineserver-pool-size.md (Variante B)."
+        echo "        Vorhanden: 11.9, 11.10, 11.11 (Staging). Neu bauen: patches/wineserver-pool-size.md (Variante B)."
         exit 1
         ;;
 esac
