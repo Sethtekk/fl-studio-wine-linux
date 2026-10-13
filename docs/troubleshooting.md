@@ -70,3 +70,7 @@ Die Zeile `start-flstudio.sh: … Getötet pw-jack wine …` erscheint bei jedem
 ```bash
 pkexec bash scripts/install-fl-wine-automation.sh
 ```
+
+## „Der Treiber konnte nicht gestartet werden“ beim Start
+
+FL öffnet zwei Fehlerdialoge und das MIDI-Fenster, weil `PipeWire-System - input` und `PipeWire-RT-Event - input` als MIDI-Eingänge aktiviert sind (Status FAIL). Das sind Verwaltungsports von PipeWires MIDI-Brücke. In *Options → MIDI Settings* beide Einträge auswählen und *Enable* ausschalten.

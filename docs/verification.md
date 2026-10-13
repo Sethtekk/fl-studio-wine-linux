@@ -18,8 +18,8 @@ Belegstufen:
 | EGL statt GLX (GL-Deadlock) | FL-Alltag | Watchdog-Log: 88 Deadlocks bis 31.08.2026 22:18, seitdem keiner (über 130 Sitzungen) |
 | d2d1-Fixes (Hänger/Abstürze) | isoliert + FL-Sitzung | Fuzzer, Wine-Testsuite; FL-Sitzungen mit Serum 2 ohne Absturz |
 | d2d1-Speicherleck | isoliert + FL-Sitzung | Testprogramm; 15 min FL mit offenem Serum 2: +0,37 MB/min |
-| d2d1-Leistung (Hollow-Figuren) | isoliert | Benchmark; **Messung in FL unter Wiedergabe offen** |
-| nih-plug-Absturz (baseview) | isoliert | Absturz in FL beobachtet und im CLAP-Testhost reproduziert; Neubau öffnet und rendert; **Test in FL offen** |
+| d2d1-Leistung (Hollow-Figuren) | FL gemessen | Benchmark 11× schneller, **in FL bei Serum 2 kein messbarer Effekt** (55 % vs. 56 %) |
+| nih-plug-Absturz (baseview) | FL-Sitzung | Spectral Compressor, Diopser, Crisp in FL geöffnet und gerendert, 3× Alpha-Fallback im Log, kein Absturz |
 | Update-Automatik | System | Selbsttest als root bestanden |
 | `WINEDEBUG=fixme-all` | FL-Sitzung | 11 000 Logzeilen/s gemessen; Kosten 1–4 µs pro Zeichenaufruf |
 | Brio-Mikrofon trennen | Logik | Filter gegen echte und synthetische `pw-link`-Ausgabe getestet; Gerät beim Test nicht angeschlossen |
@@ -101,9 +101,27 @@ Ohne root getestet: alle Zweige des Hook-Appliers (Binary aktiv, fehlt, manipuli
 
 Hinweis: `sudo` braucht ein Terminal für die Passworteingabe. Aus Werkzeugen ohne TTY (z. B. dem `!`-Präfix in Claude Code) scheitert es; dort hilft `pkexec`, das einen grafischen Dialog öffnet.
 
+## Messung in FL am 13.10.2026, 21:16–21:21
+
+Testprojekt mit Serum 2 (Init-Preset, 4 Steps, 140 BPM), Master stumm, Wiedergabe, Fenster per uinput-Eingaben bedient:
+
+| Bedingung | Main-Thread | Gesamt-CPU | RSS |
+|---|---|---|---|
+| neue d2d1, Serum-Fenster offen | 55,5–56,3 % | ~75 % | flach |
+| neue d2d1, Serum-Fenster zu | 16,3–16,6 % | ~23 % | flach |
+| alte d2d1 (ohne Hollow-Fix), Serum-Fenster offen | 54,4–55,5 % | ~75 % | flach |
+
+Serums Oberfläche kostet rund 40 Prozentpunkte eines Kerns; der Hollow-Fix ändert daran nichts. PC-Stichprobe (40 Samples): libc 19, d2d1 7, d3d11 (DXVK) 5, ntdll 4 – kein einzelner Hotspot in d2d1.
+
+**Plugins in FL:** Spectral Compressor, Diopser und Crisp öffnen und rendern fehlerfrei, gleichzeitig offen, FL stabil.
+
+**Neu gefundene Auffälligkeiten:**
+- **MIDI-Startfehler (behoben):** `PipeWire-System - input` und `PipeWire-RT-Event - input` waren als MIDI-Eingänge aktiv und scheiterten bei jedem Start (zwei Dialoge „Der Treiber konnte nicht gestartet werden“, MIDI-Fenster öffnet sich). Beide in FL deaktiviert (`HKCU\Software\Image-Line\FL Studio 26\Devices\MIDI input\… Enabled=0`); nächster Start ohne Dialog.
+- **Darstellungsfehler (offen):** Wird ein Plugin-Fenster mit Vulkan/D3D-Inhalt (Serum 2) innerhalb von FL verschoben, bleibt das alte Bild an der alten Stelle, bis das Plugin neu zeichnet. Bei Wiedergabe korrigiert es sich sofort, im Leerlauf erst bei Interaktion. Vermutete Ursache: Wine stößt nach dem Verschieben der client surface kein Neuzeichnen an.
+
 ## Offen
 
-- Serum 2 in FL gezielt messen: Main-Thread-Last bei Wiedergabe mit offenem Serum-Fenster, ohne parallel ladendes Projekt, alte gegen neue d2d1.
-- Spectral Compressor, Diopser und Crisp (Neubauten) in FL öffnen.
+- Serums UI-Last (~40 Prozentpunkte) weiter aufschlüsseln (libc-Anteil, DXVK-Present).
+- Darstellungsfehler beim Verschieben von Vulkan-Plugin-Fenstern in Wine beheben.
 - Erstes echtes wine-staging-Update mit Vorab-Build abwarten.
 - JUCE-OpenGL-Plugins (Kickstart 2, Youlean, GrapHack, iZotope): Pixelformat-Mechanismus geprüft, Oberflächen nicht einzeln im Testhost.
