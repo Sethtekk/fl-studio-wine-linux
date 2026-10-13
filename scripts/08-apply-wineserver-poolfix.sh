@@ -32,30 +32,18 @@ WV="$(printf '%s' "$WV_RAW" | grep -oE '[0-9]+\.[0-9]+' | head -1)"
 echo "=== wineserver Pool-Fix anwenden ==="
 echo "[i] Installierte Wine-Version: ${WV_RAW:-unbekannt} (erkannt: ${WV:-?})"
 
-# --- passendes Binary + MD5 zur Version waehlen ---
-case "$WV" in
-    11.9)
-        POOLFIX="$REPO_DIR/assets/wineserver-poolfix"
-        EXPECTED_MD5=da13506f620709fb5dab7d11186c6a93
-        ;;
-    11.10)
-        POOLFIX="$REPO_DIR/assets/wineserver-poolfix-11.10-staging"
-        EXPECTED_MD5=2cd976da97a88f0d4f9cba592fe18d3f
-        ;;
-    11.11)
-        POOLFIX="$REPO_DIR/assets/wineserver-poolfix-11.11-staging"
-        EXPECTED_MD5=337819d33dfaf98620be030a24626163
-        ;;
-    11.12)
-        POOLFIX="$REPO_DIR/assets/wineserver-poolfix-11.12-staging"
-        EXPECTED_MD5=6919781269e83923d784e28a2234a750
-        ;;
-    *)
-        echo "FEHLER: Fuer Wine '${WV_RAW:-?}' liegt kein vorgebautes Pool-Fix-Binary bei."
-        echo "        Vorhanden: 11.9, 11.10, 11.11 (Staging). Neu bauen: patches/wineserver-pool-size.md (Variante B)."
-        exit 1
-        ;;
-esac
+# --- passendes Binary + MD5 aus dem Manifest waehlen ---
+MANIFEST="$REPO_DIR/assets/poolfix-md5.txt"
+NAME="wineserver-poolfix-$WV-staging"
+[ "$WV" = "11.9" ] && NAME="wineserver-poolfix"
+POOLFIX="$REPO_DIR/assets/$NAME"
+EXPECTED_MD5="$(awk -v n="$NAME" '$2 == n {print $1}' "$MANIFEST" 2>/dev/null)"
+if [ -z "$EXPECTED_MD5" ]; then
+    echo "FEHLER: Fuer Wine '${WV_RAW:-?}' liegt kein vorgebautes Pool-Fix-Binary bei."
+    echo "        Vorhanden: $(awk '{v=$2; sub(/^wineserver-poolfix-?/, "", v); sub(/-staging$/, "", v); printf "%s ", (v == "" ? "11.9" : v)}' "$MANIFEST")"
+    echo "        Automatisch bauen und einspielen: sudo bash scripts/pacman-hook-apply.sh"
+    exit 1
+fi
 
 echo "[i] Passendes Binary: $(basename "$POOLFIX") (MD5 $EXPECTED_MD5)"
 
