@@ -8,6 +8,8 @@ Wines Direct2D trianguliert jede gefüllte Pfad-Geometrie (Constrained Delaunay 
 
 ## Die fünf Fehlerstellen
 
+(dazu eine Leistungsänderung, siehe unten)
+
 Gefunden per Live-Debugging (2026-05) bzw. per Fuzzing mit zufälligen degenerierten Pfaden (2026-10, siehe unten).
 
 | # | Funktion | Fehler (Stock-Wine) | Fix |
@@ -19,6 +21,12 @@ Gefunden per Live-Debugging (2026-05) bzw. per Fuzzing mit zufälligen degenerie
 | 5 | `d2d_geometry_resolve_beziers` | Überlappende Kontrolldreiecke werden endlos halbiert (jeder Split erzeugt neue Überlappungen), Speicher wächst ohne Ende | Gesamt-Budget `16 * Bézier-Anzahl + 1024` Splits pro Geometrie; danach bleibt die Restüberlappung (minimal ungenaue Füllung statt Hänger) |
 
 Ein abgebrochener Pfad führt immer in einen bestehenden Fehlerpfad: Entweder wird ein Segment übersprungen oder die Füllung dieser einen Geometrie verworfen (`E_FAIL`, Geometrie wird nicht gefüllt). Nie ein Absturz, nie ein Hänger.
+
+## Leistung: Umriss-Pfade ohne Füllflächen-Vorbereitung
+
+`d2d_geometry_sink_Close()` berechnet für alle Figuren die Selbstüberschneidungen (`d2d_geometry_intersect_self`, O(n²)), obwohl diese nur für die Triangulierung der Füllfläche gebraucht werden. Der Umriss entsteht bereits in `EndFigure()`. JUCE 8 erzeugt in `strokePath()` bei jedem Aufruf eine neue Geometrie mit `D2D1_FIGURE_BEGIN_HOLLOW` und zeichnet nur den Umriss.
+
+Der Patch überspringt Hollow-Figuren in `d2d_geometry_intersect_self` – Triangulierung und Bézier-Auflösung tun das bereits. Bei 400 Bézier-Segmenten sinkt `Close()` von 3,32 ms auf unter 0,01 ms, die Gesamtzeit pro Pfad von 3,58 auf 0,31 ms.
 
 ## Speicherleck (upstream behoben, kam mit dem Rebuild)
 
@@ -34,12 +42,12 @@ Die alte DLL (Wine 11.9) gab `figure->vertex_types` nie frei. Gemessen: **+17,5 
 | Alte Patch-DLL (Wine 11.9) | Hänger in jedem 10.000er-Block (erster bei Seed 940) |
 | **Neue Patch-DLL (Wine 11.19)** | **240.000 Seeds: 0 Hänger, 0 Abstürze** |
 
-**Wine-Testsuite** `dlls/d2d1/tests` (17.475 Einzeltests): Stock und gepatcht liefern **identische** Ergebnisse → keine Regression bei korrekter Geometrie.
+**Wine-Testsuite** `dlls/d2d1/tests` (17.475 Einzeltests): Stock und gepatcht liefern **identische** Ergebnisse (0 Fehler im sauberen Prefix) → keine Regression bei korrekter Geometrie.
 
 ## Die vorkompilierte DLL
 
 `assets/d2d1.dll.patched` — Wine Staging 11.19, x86_64, Builtin-Signatur bei 0x40 genullt.
-- **MD5:** `826992aa3b34cc9fd6f232719eb8c3c0`
+- **MD5:** `fd197f30b36451714e5fc5a7afc148c9`
 - d2d1 ist eine reine PE-DLL; sie funktioniert auch unter anderen Wine-Versionen. Neu bauen lohnt sich, wenn upstream in `dlls/d2d1/` Fehler behebt (wie das Leck oben).
 
 ## Neu bauen für eine neue Wine-Version

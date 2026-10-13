@@ -217,7 +217,29 @@
          {
              ERR("Edge not found.\n");
              return FALSE;
-@@ -3632,19 +3682,32 @@
+@@ -2738,6 +2788,12 @@
+     for (idx_p.figure_idx = 0; idx_p.figure_idx < geometry->u.path.figure_count; ++idx_p.figure_idx)
+     {
+         figure_p = &geometry->u.path.figures[idx_p.figure_idx];
++        /* Intersections only matter for the fill; the outline was already built
++         * in EndFigure(). Hollow figures are never filled, and stroke-only paths
++         * (e.g. JUCE's strokePath(), rebuilt every frame) would otherwise pay
++         * for an O(n^2) self-intersection test on every Close(). */
++        if (figure_p->flags & D2D_FIGURE_FLAG_HOLLOW)
++            continue;
+         idx_p.control_idx = 0;
+         for (idx_p.vertex_idx = 0; idx_p.vertex_idx < figure_p->vertex_count; ++idx_p.vertex_idx)
+         {
+@@ -2747,6 +2803,8 @@
+             for (idx_q.figure_idx = 0; idx_q.figure_idx <= idx_p.figure_idx; ++idx_q.figure_idx)
+             {
+                 figure_q = &geometry->u.path.figures[idx_q.figure_idx];
++                if (figure_q->flags & D2D_FIGURE_FLAG_HOLLOW)
++                    continue;
+                 if (idx_q.figure_idx != idx_p.figure_idx)
+                 {
+                     if (!d2d_rect_check_overlap(&figure_p->bounds, &figure_q->bounds))
+@@ -3632,19 +3690,32 @@
      struct d2d_curve_vertex *b;
      const D2D1_POINT_2F *p[3];
      struct d2d_figure *figure;
