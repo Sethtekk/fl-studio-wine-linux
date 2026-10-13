@@ -1,4 +1,4 @@
-# Debugging-Journal: FL Studio 2025 unter Wine – Vom Freeze zur Lösung
+# Debugging-Journal: FL Studio unter Wine – vom Freeze zur Lösung
 
 Dieses Dokument beschreibt den vollständigen Debugging-Prozess, der zur Lösung des FL-Studio-Freeze-Problems geführt hat. Es soll nachvollziehbar machen, **warum** der Patch notwendig ist und **wie** wir das Problem identifiziert haben — damit jeder die Lösung verstehen und bei neuen Wine-Versionen adaptieren kann.
 
@@ -363,6 +363,24 @@ Nach allen Fixes: WineASIO wird in FL Studio unter `Options → Audio Settings �
 **Wichtig:** Das grüne **Input-Monitoring-Symbol** im FL Studio Mixer deaktivieren, um Rückkopplungen zu vermeiden. Das ist kein Wine-Bug — identisches Verhalten wie auf Windows.
 
 ---
+
+## Phase 7: GL-Deadlock unter NVIDIA (August 2026)
+
+Ein zweiter Freeze-Typ: UI steht, Audio läuft, der Main-Thread verbraucht **keine** CPU. Die Auswertung von `/proc/<pid>/task/*/syscall` und der Futex-Adressen als `pthread_mutex_t` zeigte einen Lock-Zyklus: Ein `SmoothAnimation`-Thread hält den rekursiven GL-Mutex des NVIDIA-Treibers und wartet auf eine X-Antwort, die nur der Main-Thread abholen kann – der wiederum auf den GL-Mutex wartet. Ursache ist, dass winex11 alle GLX-Aufrufe über eine einzige, von allen Threads geteilte Xlib-Verbindung führt ([Bug 60113](https://bugs.winehq.org/show_bug.cgi?id=60113)).
+
+Im Prefix stand noch `UseEGL=N` aus einem früheren Test. Mit EGL (Wine-Default) trat in sechs Wochen Alltagsbetrieb kein Deadlock mehr auf; vorher griff ein Watchdog bis zu 27-mal pro Tag ein.
+
+## Phase 8: Fuzzing der d2d1-Triangulierung (Oktober 2026)
+
+Die gepatchte DLL stammte noch aus Wine 11.9. Ein Rebuild auf 11.19 brachte upstreams Fix für ein Speicherleck mit. Um die Robustheit zu prüfen, entstand ein Fuzzer (`tools/d2d1_fuzz.cpp`), der zufällige Pfade auf einem 6×6-Raster erzeugt – maximal viele Duplikate und Kollinearitäten. Er fand innerhalb von Sekunden vier weitere Fehlerstellen, darunter eine, die der eigene Patch eingeführt hatte: Beim Überspringen eines Segments blieb der Rückgabe-Edge unverändert, der Aufrufer arbeitete mit einem freigegebenen Edge weiter. Das passt zu drei verschluckten Access-Violations direkt nach Direct2D-Aufrufen in einem älteren Log.
+
+Alle Hänger wurden mit `gdb` (nur `$pc`) und `addr2line` gegen die DLL mit Debug-Informationen lokalisiert, Stack-Overflows durch Zählen der Rücksprungadressen auf dem Stack. Nach den Fixes liefen 240 000 Fuzz-Fälle ohne Fehler, Wines Testsuite blieb unverändert.
+
+## Phase 9: Abstürze und Leistung einzelner Plugins (Oktober 2026)
+
+**nih-plug:** Ein Live-Absturz zeigte `Could not create OpenGL context: CreationFailed` in baseview. Ein nachgebautes WGL-Testprogramm belegte, dass NVIDIA-EGL Formate mit 8 Bit Alpha nur mit 32-Bit-Visual anbietet und Wine diese für Fenster sperrt. Ein minimaler CLAP-Host (`tools/clap_guitest.c`) reproduzierte den Absturz außerhalb von FL; mit dem Alpha-Fallback in baseview öffnen und rendern alle betroffenen Editoren.
+
+**Serum 2:** Während der Wiedergabe stieg FLs Main-Thread von 25 auf bis zu 80 % CPU, begleitet von 11 000 `fixme:d2d`-Zeilen pro Sekunde. Der JUCE-Quellcode zeigt, dass `strokePath()` pro Aufruf eine neue Hollow-Geometrie erzeugt. Ein Benchmark ergab 3,3 ms pro `Close()` – fast vollständig in der Selbstüberschneidungs-Prüfung, die nur für Füllflächen nötig ist. Das Überspringen von Hollow-Figuren senkte die Zeit pro Pfad um den Faktor 11.
 
 ## Zusammenfassung
 
