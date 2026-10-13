@@ -16,7 +16,7 @@ Das Repository enthält Patches für Wine-Komponenten, Installationsskripte, Lau
 | Symptom unter Stock-Wine | Ursache | Lösung |
 |---|---|---|
 | FL friert beim Öffnen von Plugin-Fenstern ein (Serum 2, Ozone …) | Endlos-Rekursionen und -Schleifen in Wines Direct2D-Triangulierung | Gepatchte `d2d1.dll` ([Details](patches/d2d1-geometry-fix.md)) |
-| Serum-2-Oberfläche träge, Main-Thread bis 80 % | Wine trianguliert auch reine Umriss-Pfade (JUCE `strokePath`) | Hollow-Figuren überspringen: Pfadaufbau ~11× schneller |
+| Hohe CPU-Last beim Zeichnen von Serum 2 (bis zu 11 000 Direct2D-Aufrufe/s) | Wine trianguliert auch reine Umriss-Pfade (JUCE `strokePath`) | Hollow-Figuren überspringen: Pfadaufbau ~11× schneller (Benchmark) |
 | Arbeitsspeicher wächst bei offenen Plugin-Fenstern | Leck in `d2d_figure_cleanup` (Wine ≤ 11.9) | `d2d1.dll` auf Basis von Wine 11.19 |
 | `System Error 1411: Klasse existiert nicht` bei großen Projekten | Shared-Session-Pool des wineservers erschöpft | Gepatchter `wineserver` ([Details](patches/wineserver-pool-size.md)) |
 | UI hängt, Audio läuft weiter (NVIDIA) | GL-Deadlock zwischen NVIDIA-GL-Lock und gemeinsamer Xlib-Verbindung | EGL statt GLX (`UseEGL=Y`) |
@@ -62,6 +62,7 @@ Ausführliche Anleitung: [`docs/installation.md`](docs/installation.md)
 | [Plugins](docs/plugins.md) | Getestete Plugins, nih-plug-Neubau, Testwerkzeuge |
 | [Updates](docs/updating.md) | Verhalten bei Wine-Updates, Pacman-Hook, Neubau der Patches |
 | [Fehlerbehebung](docs/troubleshooting.md) | Freezes, Abstürze, Fehler 1411, Splice |
+| [Verifikation](docs/verification.md) | Was wie getestet ist – und was noch offen ist |
 | [Debugging-Journal](docs/debugging-journey.md) | Wie die Ursachen gefunden wurden |
 | [d2d1-Patch](patches/d2d1-geometry-fix.md) · [Pool-Patch](patches/wineserver-pool-size.md) | Technische Details der Wine-Patches |
 

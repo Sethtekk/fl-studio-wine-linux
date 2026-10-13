@@ -380,7 +380,7 @@ Alle Hänger wurden mit `gdb` (nur `$pc`) und `addr2line` gegen die DLL mit Debu
 
 **nih-plug:** Ein Live-Absturz zeigte `Could not create OpenGL context: CreationFailed` in baseview. Ein nachgebautes WGL-Testprogramm belegte, dass NVIDIA-EGL Formate mit 8 Bit Alpha nur mit 32-Bit-Visual anbietet und Wine diese für Fenster sperrt. Ein minimaler CLAP-Host (`tools/clap_guitest.c`) reproduzierte den Absturz außerhalb von FL; mit dem Alpha-Fallback in baseview öffnen und rendern alle betroffenen Editoren.
 
-**Serum 2:** Während der Wiedergabe stieg FLs Main-Thread von 25 auf bis zu 80 % CPU, begleitet von 11 000 `fixme:d2d`-Zeilen pro Sekunde. Der JUCE-Quellcode zeigt, dass `strokePath()` pro Aufruf eine neue Hollow-Geometrie erzeugt. Ein Benchmark ergab 3,3 ms pro `Close()` – fast vollständig in der Selbstüberschneidungs-Prüfung, die nur für Füllflächen nötig ist. Das Überspringen von Hollow-Figuren senkte die Zeit pro Pfad um den Faktor 11.
+**Serum 2:** Während Serum 2 zeichnete, schrieb Wine 11 000 `fixme:d2d`-Zeilen pro Sekunde, und FLs Main-Thread lag bei 64–82 % statt 24 % – allerdings lud zur selben Zeit ein großes Projekt, der Anteil von Serum ist daraus nicht sauber bestimmbar. Der JUCE-Quellcode zeigt, dass `strokePath()` pro Aufruf eine neue Hollow-Geometrie erzeugt. Ein Benchmark ergab 3,3 ms pro `Close()` – fast vollständig in der Selbstüberschneidungs-Prüfung, die nur für Füllflächen nötig ist. Das Überspringen von Hollow-Figuren senkte die Zeit pro Pfad um den Faktor 11.
 
 ## Zusammenfassung
 

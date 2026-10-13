@@ -5,6 +5,7 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/).
 ## [Unreleased]
 
 ### Hinzugefügt
+- `docs/verification.md`: Prüfbericht mit Belegstufen (FL-Alltag, FL-Sitzung, isoliert, offen), Sitzungsprotokoll vom 13.10.2026 und Ergebnis des Automatik-Selbsttests.
 - Update-Automatik: Wartungs-Timer (`wineserver-poolfix-maintain`) baut den Pool-Fix für anstehende wine-staging-Versionen vorab und repariert, falls er fehlt. Der Pacman-Hook arbeitet nur noch offline – der Download im Hook scheiterte bei Transaktionen, die gleichzeitig Netzwerk-Komponenten aktualisierten.
 - Launcher stellt eine ersetzte `d2d1.dll` selbst wieder her und warnt per Desktop-Benachrichtigung bei fehlendem Pool-Fix.
 - `scripts/build-wineserver-poolfix.sh` (vorher nur lokal), mit Download-Wiederholungen.

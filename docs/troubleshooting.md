@@ -62,3 +62,11 @@ Falsche Wiedergabegeschwindigkeit, fehlende Eingänge oder Webcam-Mikrofone auf 
 ## „Getötet" am Ende der Sitzung
 
 Die Zeile `start-flstudio.sh: … Getötet pw-jack wine …` erscheint bei jedem normalen Beenden. Wine setzt `TerminateProcess` auf den eigenen Prozess per SIGKILL um; das ist kein Absturz.
+
+## `sudo: Zum Lesen des Passworts ist ein Terminal erforderlich`
+
+`sudo` fragt das Passwort über ein Terminal ab. Aus Umgebungen ohne TTY (Skripte, IDE-Integrationen, das `!`-Präfix in Claude Code) schlägt es fehl. Den Befehl in einem normalen Terminal ausführen oder `pkexec` verwenden, das einen grafischen Passwortdialog öffnet:
+
+```bash
+pkexec bash scripts/install-fl-wine-automation.sh
+```
