@@ -5,11 +5,17 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/).
 ## [Unreleased]
 
 ### Hinzugefügt
+- Update-Automatik: Wartungs-Timer (`wineserver-poolfix-maintain`) baut den Pool-Fix für anstehende wine-staging-Versionen vorab und repariert, falls er fehlt. Der Pacman-Hook arbeitet nur noch offline – der Download im Hook scheiterte bei Transaktionen, die gleichzeitig Netzwerk-Komponenten aktualisierten.
+- Launcher stellt eine ersetzte `d2d1.dll` selbst wieder her und warnt per Desktop-Benachrichtigung bei fehlendem Pool-Fix.
+- `scripts/build-wineserver-poolfix.sh` (vorher nur lokal), mit Download-Wiederholungen.
 - `scripts/09-build-nih-plug.sh` und `patches/baseview-alpha-fallback.patch`: Spectral Compressor, Diopser und Crisp stürzen unter EGL nicht mehr beim Öffnen des Editors ab.
 - `tools/`: CLAP- und VST2-GUI-Testhost, d2d1-Fuzzer, Benchmark für Umriss-Pfade.
 - Dokumentation unter `docs/` (Installation, Audio, Plugins, Updates, Fehlerbehebung), `LICENSE`.
 
 ### Geändert
+- wineserver wird atomar ersetzt (vorher In-place-Kopie, scheitert bei laufendem wineserver mit „Text file busy“).
+- Manifest erlaubt mehrere Hashes pro Version; `08-apply-wineserver-poolfix.sh` ist ein Wrapper um `pacman-hook-apply.sh --build`.
+- Installer und Hook verwenden den Pfad des Repositorys statt eines festen Home-Verzeichnisses.
 - d2d1: Hollow-Figuren werden bei der Selbstüberschneidungs-Prüfung übersprungen. Umriss-Pfade (JUCE 8 `strokePath`) sind dadurch rund 11-mal schneller.
 - README neu strukturiert, Detailinhalte nach `docs/` verschoben.
 - `config/dxvk.conf`: wirkungslose Option `dxvk.enableAsync` entfernt.

@@ -1,51 +1,75 @@
 #!/bin/bash
 # ============================================================
-# EINMALIGE Installation der FL-Wine-Automatik. Als root ausfuehren:
-#   sudo bash ~/fl-studio-wine-linux/scripts/install-fl-wine-automation.sh
+# Einmalige Installation der Update-Automatik (root):
+#   sudo bash scripts/install-fl-wine-automation.sh
 #
-# 1) installiert den pacman-Hook (re-appliziert Pool-Fix nach jedem
-#    wine-staging-Update automatisch)
-# 2) spielt den Pool-Fix fuer die aktuelle Wine-Version JETZT ein
-# 3) testet Protokoll-Kompatibilitaet und macht bei Mismatch automatisch
-#    rueckgaengig (damit wine NIE kaputt zurueckbleibt)
+#   1. Pacman-Hook:  spielt nach jedem wine-staging-Update den
+#                    passenden Pool-Fix offline ein
+#   2. systemd-Timer: repariert, falls der Fix fehlt, und baut ihn für
+#                    anstehende wine-staging-Versionen vorab
+#   3. erster Wartungslauf sofort
+#
+# Deinstallation: sudo bash scripts/install-fl-wine-automation.sh --remove
+# Selbsttest:     sudo bash scripts/install-fl-wine-automation.sh --selftest
+#                 (setzt kurz den Stock-wineserver ein und prüft, ob der
+#                 Wartungsdienst den Pool-Fix selbstständig zurückholt)
 # ============================================================
-if [ "$EUID" -ne 0 ]; then
-    echo "Bitte mit sudo ausfuehren:  sudo bash $0"
-    exit 1
+set -euo pipefail
+[ "$EUID" -eq 0 ] || { echo "Bitte mit sudo ausführen:  sudo bash $0"; exit 1; }
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+HOOK=/etc/pacman.d/hooks/zz-wineserver-poolfix.hook
+UNITS=(wineserver-poolfix-maintain.service wineserver-poolfix-maintain.timer)
+
+if [ "${1:-}" = "--remove" ]; then
+    systemctl disable --now wineserver-poolfix-maintain.timer 2>/dev/null || true
+    rm -f "$HOOK" "${UNITS[@]/#//etc/systemd/system/}"
+    systemctl daemon-reload
+    echo "Automatik entfernt. /usr/bin/wineserver bleibt unverändert (Stock: sudo pacman -S wine-staging)."
+    exit 0
 fi
-RUSER="${SUDO_USER:-sethtekk}"
-REPO="/home/$RUSER/fl-studio-wine-linux"
-TARGET=/usr/bin/wineserver
 
-echo "== 1) Pacman-Hook installieren =="
-install -Dm644 "$REPO/hooks/zz-wineserver-poolfix.hook" \
-        /etc/pacman.d/hooks/zz-wineserver-poolfix.hook
-echo "   -> /etc/pacman.d/hooks/zz-wineserver-poolfix.hook"
-echo
+render() { sed "s#@REPO@#$REPO#g" "$1"; }
 
-echo "== 2) Pool-Fix fuer aktuelle Wine-Version einspielen =="
-bash "$REPO/scripts/pacman-hook-apply.sh"
-echo
-
-echo "== 3) Protokoll-Kompatibilitaet testen =="
-# gegen den bereits initialisierten FL-Prefix -> schnell, nicht-destruktiv
-OUT="$(sudo -u "$RUSER" env WINEPREFIX=/run/media/sethtekk/WinVM/.wine \
-        WINEDEBUG=-all WINEDLLOVERRIDES='mscoree,mshtml=' \
-        timeout 40 wine cmd /c ver 2>&1)"
-if printf '%s' "$OUT" | grep -qi "version mismatch"; then
-    echo "   [!] PROTOKOLL-MISMATCH erkannt:"
-    printf '       %s\n' "$OUT" | grep -i "mismatch"
-    if [ -f "$TARGET.orig" ]; then
-        cp "$TARGET.orig" "$TARGET"
-        echo "   [!] wineserver auf STOCK zurueckgesetzt (wine bleibt funktionsfaehig)."
+if [ "${1:-}" = "--selftest" ]; then
+    VER="$(wine --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+    STOCK="/usr/bin/wineserver.stock-$VER"
+    [ -f "$STOCK" ] || { echo "Kein Stock-Backup $STOCK - Selbsttest nicht möglich."; exit 1; }
+    BEFORE="$(md5sum /usr/bin/wineserver | awk '{print $1}')"
+    echo "== Selbsttest: Stock-wineserver $VER einsetzen (atomar; laufende Wine-Prozesse bleiben unberührt)"
+    install -m 755 "$STOCK" /usr/bin/wineserver.selftest && mv -f /usr/bin/wineserver.selftest /usr/bin/wineserver
+    echo "== Wartungsdienst starten"
+    systemctl start wineserver-poolfix-maintain.service || true
+    AFTER="$(md5sum /usr/bin/wineserver | awk '{print $1}')"
+    journalctl -u wineserver-poolfix-maintain.service -n 8 --no-pager -o cat
+    if awk '{print $1}' "$REPO/assets/poolfix-md5.txt" | grep -qx "$AFTER"; then
+        echo "== ERGEBNIS: OK - Pool-Fix automatisch wiederhergestellt (md5 $AFTER)."
+    else
+        echo "== ERGEBNIS: FEHLER - wineserver ist $AFTER. Zurück auf den vorherigen Stand ($BEFORE)."
+        bash "$REPO/scripts/pacman-hook-apply.sh"
+        exit 1
     fi
-    echo "   [!] Bitte Claude informieren - Neu-Build noetig."
-    exit 1
-else
-    echo "   [OK] wine antwortet sauber: $(printf '%s' "$OUT" | tr -d '\r' | tail -1)"
-    echo "   [OK] Pool-Fix aktiv und protokoll-kompatibel."
+    exit 0
 fi
+
+echo "== 1) Pacman-Hook =="
+install -d /etc/pacman.d/hooks
+render "$REPO/hooks/zz-wineserver-poolfix.hook" > "$HOOK"
+chmod 644 "$HOOK"
+echo "   $HOOK"
+
+echo "== 2) systemd-Timer =="
+for u in "${UNITS[@]}"; do
+    render "$REPO/systemd/$u" > "/etc/systemd/system/$u"
+    chmod 644 "/etc/systemd/system/$u"
+done
+systemctl daemon-reload
+systemctl enable --now wineserver-poolfix-maintain.timer
+systemctl list-timers --no-pager wineserver-poolfix-maintain.timer | sed -n '1,2p'
+
+echo "== 3) Erster Wartungslauf =="
+systemctl start wineserver-poolfix-maintain.service || true
+journalctl -u wineserver-poolfix-maintain.service -n 15 --no-pager -o cat
+
 echo
-echo "== Fertig - FL-Wine-Automatik installiert. =="
-echo "Ab jetzt spielt jedes wine-staging-Update den Pool-Fix automatisch wieder ein"
-echo "(bzw. warnt, wenn fuer eine neue Version erst neu gebaut werden muss)."
+echo "Fertig. Status jederzeit: journalctl -u wineserver-poolfix-maintain.service"

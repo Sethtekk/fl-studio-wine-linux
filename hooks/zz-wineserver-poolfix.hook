@@ -5,6 +5,6 @@ Type = Package
 Target = wine-staging
 
 [Action]
-Description = FL Studio: wineserver Pool-Fix (512->32768) nach wine-staging-Update wieder einspielen...
+Description = FL Studio: wineserver-Pool-Fix für die neue wine-staging-Version einspielen
 When = PostTransaction
-Exec = /bin/bash /home/sethtekk/fl-studio-wine-linux/scripts/pacman-hook-apply.sh
+Exec = /bin/bash @REPO@/scripts/pacman-hook-apply.sh

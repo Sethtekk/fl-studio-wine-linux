@@ -40,7 +40,13 @@ export JACK_NO_AUDIO_RESERVATION=1
 if ! awk '{print \$1}' "$REPO_DIR/assets/poolfix-md5.txt" 2>/dev/null \
         | grep -qx "\$(md5sum /usr/bin/wineserver 2>/dev/null | cut -d' ' -f1)"; then
     echo "WARNUNG: /usr/bin/wineserver (\$(wine --version)) ist NICHT der Pool-Fix. Fehler 1411 droht."
-    echo "  -> nachholen: sudo bash $REPO_DIR/scripts/pacman-hook-apply.sh"
+    echo "  -> nachholen: sudo bash $REPO_DIR/scripts/pacman-hook-apply.sh --build"
+fi
+# d2d1-Selbstheilung: ein Prefix-Update könnte die gepatchte DLL ersetzen
+D2D1_REF="$REPO_DIR/assets/d2d1.dll.patched"
+D2D1_SYS="$WINEPREFIX/drive_c/windows/system32/d2d1.dll"
+if ! cmp -s "\$D2D1_REF" "\$D2D1_SYS"; then
+    cp "\$D2D1_REF" "\$D2D1_SYS.new" && mv -f "\$D2D1_SYS.new" "\$D2D1_SYS" && echo "d2d1-Patch wiederhergestellt."
 fi
 FL_EXE="\$(ls -d "$WINEPREFIX/drive_c/Program Files/Image-Line/FL Studio "*/FL64.exe 2>/dev/null | sort -V | tail -1)"
 trap 'wineserver -k' EXIT

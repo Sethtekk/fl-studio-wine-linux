@@ -4,20 +4,43 @@
 
 | Komponente | Ort | Bei Wine-Update |
 |---|---|---|
-| `d2d1.dll` | `$WINEPREFIX/drive_c/windows/system32/` | bleibt erhalten |
-| `wineserver` (Pool-Fix) | `/usr/bin/wineserver` | wird überschrieben → Pacman-Hook spielt den Fix wieder ein |
+| `d2d1.dll` | `$WINEPREFIX/drive_c/windows/system32/` | bleibt erhalten; der Launcher stellt sie bei Abweichung wieder her |
+| `wineserver` (Pool-Fix) | `/usr/bin/wineserver` | wird überschrieben → Hook bzw. Wartungsdienst spielt den Fix wieder ein |
 | Registry (`UseEGL`, `DllOverrides`) | Prefix | bleibt erhalten |
 | Launcher | `~/start-flstudio.sh` | bleibt erhalten |
 
-## Pool-Fix-Automatik
+## Update-Automatik
 
-`hooks/zz-wineserver-poolfix.hook` ruft nach jeder `wine-staging`-Transaktion `scripts/pacman-hook-apply.sh` auf:
+Einmalig installieren:
 
-1. Liegt für die neue Version kein Binary in `assets/`, wird es als Repository-Besitzer gebaut (`runuser`, Log unter `~/wine-build/hook-build-<VER>.log`).
-2. Das Binary wird gegen das MD5-Manifest `assets/poolfix-md5.txt` geprüft und eingespielt.
-3. Ein Protokolltest in einem Wegwerf-Prefix startet `wine cmd /c echo`. Schlägt er fehl, wird der Stock-`wineserver` wiederhergestellt.
+```bash
+sudo bash scripts/install-fl-wine-automation.sh          # --remove zum Entfernen
+```
 
-Der Hook endet immer mit Exit-Code 0, ein Fehlschlag blockiert also kein Systemupdate. Der Launcher warnt beim Start, wenn der laufende `wineserver` nicht im Manifest steht.
+| Baustein | Wann | Was |
+|---|---|---|
+| Pacman-Hook `zz-wineserver-poolfix.hook` | nach jedem `wine-staging`-Update | spielt das vorhandene Pool-Fix-Binary **offline** ein; fehlt es, wird der Wartungsdienst angestoßen |
+| `wineserver-poolfix-maintain.timer` | 5 min nach dem Booten, danach alle 3 h | **Reparatur**, falls `/usr/bin/wineserver` kein Pool-Fix ist; **Vorab-Build** für in den Repos anstehende wine-staging-Versionen (`checkupdates`) |
+| Launcher | bei jedem FL-Start | stellt eine ersetzte `d2d1.dll` wieder her, warnt per Desktop-Benachrichtigung bei fehlendem Pool-Fix |
+
+**Warum nicht im Hook bauen?** Während großer pacman-Transaktionen ist das Netz oft kurz weg – etwa wenn NetworkManager, systemd oder ein VPN-Daemon im selben Lauf aktualisiert werden. Der Download der Wine-Quellen schlug deshalb im Hook wiederholt fehl. Mit dem Vorab-Build liegt das Binary in der Regel schon bereit, bevor das Update installiert wird; andernfalls holt der Wartungsdienst den Build nach der Transaktion nach (wartet auf die pacman-Sperre und auf Netz, wiederholt bei Fehlschlag nach 20 Minuten, zusätzlich bei jedem Timer-Lauf).
+
+Jedes Einspielen läuft gleich ab:
+
+1. MD5 gegen `assets/poolfix-md5.txt` prüfen (mehrere Hashes pro Version zulässig, Builds sind nicht bitgleich reproduzierbar),
+2. Stock-Binary versionsbezogen sichern (`/usr/bin/wineserver.stock-<VER>`),
+3. atomar ersetzen (ein laufender wineserver behält seine Datei),
+4. Protokolltest in einem Wegwerf-Prefix; schlägt er fehl, wird der Stock-wineserver wiederhergestellt.
+
+Builds laufen als Besitzer des Repositorys mit niedriger CPU- und IO-Priorität. Status und Logs:
+
+```bash
+systemctl list-timers wineserver-poolfix-maintain.timer
+journalctl -u wineserver-poolfix-maintain.service
+ls ~/wine-build/poolfix-build-*.log
+```
+
+Manuell (ohne Automatik): `bash scripts/08-apply-wineserver-poolfix.sh`
 
 ## d2d1 neu bauen
 

@@ -45,15 +45,15 @@ bash scripts/04-apply-d2d1-patch.sh
 
 Ohne diesen Schritt friert FL beim Öffnen von Direct2D-Plugins (Serum 2 u. a.) ein. Hintergrund: [`patches/d2d1-geometry-fix.md`](../patches/d2d1-geometry-fix.md).
 
-## 5. wineserver-Pool-Fix
+## 5. wineserver-Pool-Fix und Update-Automatik
 
 ```bash
 sudo bash scripts/install-fl-wine-automation.sh
 ```
 
-Ersetzt `/usr/bin/wineserver` durch eine Variante mit größerem Shared-Session-Pool und installiert einen Pacman-Hook, der den Fix nach jedem `wine-staging`-Update automatisch wieder einspielt – bei Bedarf inklusive Neubau und Protokolltest mit automatischem Rollback. Hintergrund: [`patches/wineserver-pool-size.md`](../patches/wineserver-pool-size.md).
+Ersetzt `/usr/bin/wineserver` durch eine Variante mit größerem Shared-Session-Pool und richtet ein, dass das nach jedem `wine-staging`-Update ohne Zutun erneut passiert: Pacman-Hook, Wartungs-Timer mit Vorab-Build für anstehende Versionen und Reparatur bei Bedarf. Details: [`updating.md`](updating.md), Hintergrund: [`patches/wineserver-pool-size.md`](../patches/wineserver-pool-size.md).
 
-Ohne root-Hook (manuell, nach jedem Wine-Update):
+Ohne Automatik (nach jedem Wine-Update erneut nötig):
 
 ```bash
 bash scripts/08-apply-wineserver-poolfix.sh
@@ -70,6 +70,7 @@ Erzeugt `~/start-flstudio.sh`, `~/start-splice.sh` und die zugehörigen Desktop-
 - setzt die Umgebungsvariablen (siehe unten),
 - warnt, wenn der installierte `wineserver` nicht im Pool-Fix-Manifest steht,
 - erkennt die installierte FL-Version automatisch,
+- stellt eine ersetzte `d2d1.dll` automatisch wieder her,
 - beendet beim Schließen den wineserver des Prefix.
 
 | Variable | Wert | Zweck |
@@ -126,8 +127,10 @@ Siehe [`plugins.md`](plugins.md#nih-plug).
 | `05-install-launchers.sh` | Launcher und Desktop-Einträge |
 | `06-setup-splice.sh` | Splice-Konfiguration reparieren |
 | `07-setup-wineasio.sh` | WineASIO und PipeWire-Rate |
-| `08-apply-wineserver-poolfix.sh` | Pool-Fix manuell einspielen |
+| `08-apply-wineserver-poolfix.sh` | Pool-Fix manuell einspielen (Wrapper) |
 | `09-build-nih-plug.sh` | nih-plug-Plugins mit baseview-Fix bauen |
-| `install-fl-wine-automation.sh` | Pool-Fix + Pacman-Hook (root) |
-| `pacman-hook-apply.sh` | Vom Hook aufgerufen: Pool-Fix bauen/einspielen/testen |
+| `install-fl-wine-automation.sh` | Update-Automatik: Hook + Wartungs-Timer (root) |
+| `poolfix-maintain.sh` | Vom Timer aufgerufen: Reparatur und Vorab-Build |
+| `build-wineserver-poolfix.sh` | Pool-Fix-wineserver für eine Wine-Version bauen |
+| `pacman-hook-apply.sh` | Pool-Fix einspielen + Protokolltest (`--build`: fehlendes Binary bauen) |
 | `restore-d2d1-patch.sh` | `d2d1.dll` nach Prefix-Updates wiederherstellen |

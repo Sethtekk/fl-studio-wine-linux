@@ -45,7 +45,7 @@ bash scripts/01-install-wine.sh           # Wine Staging + Abhängigkeiten
 bash scripts/02-setup-prefix.sh           # Prefix, Laufzeiten, UseEGL=Y
 bash scripts/03-install-dxvk.sh           # DXVK
 bash scripts/04-apply-d2d1-patch.sh       # d2d1-Patch
-sudo bash scripts/install-fl-wine-automation.sh   # Pool-Fix + Pacman-Hook
+sudo bash scripts/install-fl-wine-automation.sh   # Pool-Fix + Update-Automatik
 bash scripts/05-install-launchers.sh      # Launcher und Desktop-Einträge
 wine ~/Downloads/flstudio_win64_*.exe     # FL Studio installieren
 bash scripts/07-setup-wineasio.sh         # optional: WineASIO

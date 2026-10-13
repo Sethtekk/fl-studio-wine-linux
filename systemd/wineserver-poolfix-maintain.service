@@ -1,0 +1,19 @@
+[Unit]
+Description=FL Studio: wineserver-Pool-Fix prüfen, reparieren und vorab bauen
+StartLimitIntervalSec=1d
+StartLimitBurst=6
+Documentation=file://@REPO@/docs/updating.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash @REPO@/scripts/poolfix-maintain.sh
+# Builds dürfen eine laufende Audio-Sitzung nicht stören
+Nice=15
+IOSchedulingClass=idle
+CPUSchedulingPolicy=batch
+TimeoutStartSec=45min
+# Fehlschlag (z. B. kein Netz): nach 20 min erneut, höchstens 6-mal pro Tag
+Restart=on-failure
+RestartSec=20min
