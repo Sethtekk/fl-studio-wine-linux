@@ -6,3 +6,6 @@ da13506f620709fb5dab7d11186c6a93  wineserver-poolfix
 fbcb522a55c8bbe8f48ed6cd68374cae  wineserver-poolfix-11.14-staging
 9a19a27d55380760f93ad47ef1bc9ff8  wineserver-poolfix-11.15-staging
 dbac348a11f95c3f9283f4b447b952e4  wineserver-poolfix-11.16-staging
+d421c78e18cd5a7fcc0c1466b46a9871  wineserver-poolfix-11.17-staging
+db3c7914563d7946bf5824757ad0be4c  wineserver-poolfix-11.18-staging
+eb6884bccf20186a25e81155214d3ff8  wineserver-poolfix-11.19-staging
