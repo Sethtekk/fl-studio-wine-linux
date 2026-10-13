@@ -109,13 +109,13 @@ bash scripts/04-apply-d2d1-patch.sh
 ```
 
 Der Patch tut folgendes:
-1. Kopiert die vorkompilierte gepatchte `d2d1.dll` (Wine 11.9, x86_64) in `system32/`
+1. Kopiert die vorkompilierte gepatchte `d2d1.dll` (Wine 11.19, x86_64) in `system32/`
 2. Setzt 16 Bytes bei Offset `0x40` auf `0x00` → Wine lädt sie als "native" statt "builtin"
 3. Setzt den Registry-Eintrag `HKCU\Software\Wine\DllOverrides\d2d1 = native,builtin`
 
 **Was wurde im Quellcode geändert?**
 
-In `dlls/d2d1/geometry.c`, Funktion `d2d_cdt_insert_segment` (CDT = Constrained Delaunay Triangulation): Die ursprüngliche Implementierung rief sich selbst rekursiv auf, was bei Plugin-GUIs mit komplexen Geometrien zu einem Stack-Overflow führte. Der Fix ersetzt die Rekursion durch eine `goto`-basierte Iteration mit einem Sicherheitslimit.
+In `dlls/d2d1/geometry.c` (Triangulierung gefüllter Pfade, CDT = Constrained Delaunay Triangulation): Bei degenerierter Geometrie aus Plugin-GUIs liefen fünf Stellen in Endlos-Rekursion (Stack-Overflow) oder Endlosschleife. Alle sind jetzt begrenzt und fallen in einen sicheren Fehlerpfad zurück; außerdem enthält die DLL upstreams Fix für ein Speicherleck (+17,5 KB pro Pfad). Per Fuzzing verifiziert: 240.000 degenerierte Pfade ohne Hänger/Absturz, Wines d2d1-Testsuite unverändert. Details: [`patches/d2d1-geometry-fix.md`](patches/d2d1-geometry-fix.md).
 
 ### 4b. wineserver Pool-Fix anwenden ⚠️
 
@@ -243,7 +243,8 @@ Diese sind in den Launchers bereits gesetzt:
 | `WINEFSYNC` | `1` | Futex-basierte Synchronisation (bessere Performance) |
 | `WINEESYNC` | `1` | Event-basierte Synchronisation |
 | `STAGING_AUDIO_PERIOD` | `10000` | Audio-Latenz-Optimierung (10ms) |
-| `DXVK_ASYNC` | `1` | Asynchrone Shader-Kompilierung |
+| `__EGL_VENDOR_LIBRARY_FILENAMES` | `…/10_nvidia.json` | NVIDIAs EGL erzwingen (zusammen mit `UseEGL=Y` gegen den GL-Deadlock) |
+| `WINEDEBUG` | `fixme-all` | Unterdrückt die fixme-Flut von d2d1 (bis 11.000 Zeilen/s), `err:` bleibt an |
 | `__GL_THREADED_OPTIMIZATIONS` | `0` | Verhindert OpenGL-Threading-Konflikte |
 | `PIPEWIRE_RUNTIME_DIR` | `/run/user/1000` | PipeWire-Socket für WineASIO/JACK |
 | `JACK_NO_AUDIO_RESERVATION` | `1` | Verhindert JACK-Audiosystem-Reservierung |
@@ -282,6 +283,10 @@ bash scripts/restore-d2d1-patch.sh
 ## Fehlerbehebung
 
 ### FL Studio friert ein
+
+**Erst prüfen, welcher Freeze es ist:**
+- **GL-Deadlock** (UI steht, Audio läuft weiter, kein CPU-Verbrauch im Main-Thread): `UseEGL` muss `Y` sein — `wine reg query "HKCU\Software\Wine\X11 Driver" /v UseEGL`. Unter GLX verklemmen sich FLs OpenGL-UI-Threads mit NVIDIAs GL-Lock auf der gemeinsamen Xlib-Verbindung ([Wine-Bug 60113](https://bugs.winehq.org/show_bug.cgi?id=60113)). Seit der Umstellung auf EGL: 0 Deadlocks in 6 Wochen.
+- **Plugin-Fenster öffnet → Freeze** (Main-Thread 100 % CPU oder Zombie): d2d1-Patch fehlt oder wurde überschrieben → `bash scripts/restore-d2d1-patch.sh`.
 
 ```bash
 # Sofort Wine-Server killen:
@@ -336,6 +341,8 @@ Dann in FL Studio: `Options → Audio Settings → ASIO → WineASIO`.
 ### Webcam-Mikrofon belegt Input 1 in FL Studio
 
 WineASIO verbindet sich automatisch mit **allen** physischen JACK-Capture-Ports — auch USB-Webcam-Mikrofonen. Fix: WirePlumber-Regel `node.physical = false` für das Webcam-Gerät setzen (siehe Schritt 7 oben).
+
+> ⚠️ Bei der Logitech Brio stört `node.physical = false` das Webcam-Mikrofon selbst (es bleibt stumm). Alternative ohne WirePlumber-Regel: Der Launcher trennt nach dem Start alle Quellen von `FL64:in_*`, die nicht vom Audio-Interface kommen (`pw-link -l` auswerten, fremde Links mit `pw-link -d` lösen). Symptom ohne Fix: im PipeWire-Log `spa.alsa: hw:N,0c: follower … resync`, weil das 48-kHz-Webcam-Mikro in den 44,1-kHz-Graphen resampelt wird.
 
 ### Sample-Rate-Fehler beim Start (44100 Hz)
 

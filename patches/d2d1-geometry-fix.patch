@@ -1,6 +1,115 @@
 --- a/dlls/d2d1/geometry.c
 +++ b/dlls/d2d1/geometry.c
-@@ -2288,9 +2288,22 @@
+@@ -2234,7 +2234,14 @@
+                 d2d_cdt_edge_destination(cdt, &candidate), d2d_cdt_edge_destination(cdt, &next)))
+             candidate = next;
+         d2d_cdt_edge_next_left(cdt, &next, &next);
+-        ++count;
++        /* Degenerate input (collinear/duplicate vertices) can leave a face ring
++         * that never returns to the base edge origin. A face can't have more
++         * edges than the whole triangulation, so bail out instead of spinning. */
++        if (++count > 2 * cdt->edge_count + 16)
++        {
++            WARN("Face walk did not terminate, giving up.\n");
++            return FALSE;
++        }
+     }
+ 
+     if (count > 1)
+@@ -2256,32 +2263,76 @@
+     return TRUE;
+ }
+ 
+-static void d2d_cdt_cut_edges(struct d2d_cdt *cdt, struct d2d_cdt_edge_ref *end_edge,
++/* Iterative form of the original tail-recursive walk: the edges crossed by
++ * the new segment are collected first and destroyed afterwards in reverse
++ * order, exactly as the recursion unwound. Degenerate geometry can make the
++ * walk cycle, which used to overflow the stack; a walk can't cross more edges
++ * than the triangulation has, so stop there and leave the topology untouched. */
++static BOOL d2d_cdt_cut_edges(struct d2d_cdt *cdt, struct d2d_cdt_edge_ref *end_edge,
+         const struct d2d_cdt_edge_ref *base_edge, size_t start_vertex, size_t end_vertex)
+ {
+-    struct d2d_cdt_edge_ref next;
++    struct d2d_cdt_edge_ref next, current = *base_edge, *cut = NULL;
++    size_t cut_count = 0, cut_size = 0;
+     float ccw;
+ 
+-    d2d_cdt_edge_next_left(cdt, &next, base_edge);
+-    if (d2d_cdt_edge_destination(cdt, &next) == end_vertex)
++    for (;;)
+     {
+-        *end_edge = next;
+-        return;
++        d2d_cdt_edge_next_left(cdt, &next, &current);
++        if (d2d_cdt_edge_destination(cdt, &next) == end_vertex)
++            break;
++
++        ccw = d2d_cdt_ccw(cdt, d2d_cdt_edge_destination(cdt, &next), end_vertex, start_vertex);
++        if (ccw == 0.0f)
++            break;
++
++        if (ccw > 0.0f)
++            d2d_cdt_edge_next_left(cdt, &next, &next);
++
++        d2d_cdt_edge_sym(&next, &next);
++
++        if (cut_count >= cdt->edge_count)
++        {
++            WARN("Edge walk did not terminate.\n");
++            free(cut);
++            return FALSE;
++        }
++        if (!d2d_array_reserve((void **)&cut, &cut_size, cut_count + 1, sizeof(*cut)))
++        {
++            free(cut);
++            return FALSE;
++        }
++        cut[cut_count++] = next;
++        current = next;
+     }
+ 
+-    ccw = d2d_cdt_ccw(cdt, d2d_cdt_edge_destination(cdt, &next), end_vertex, start_vertex);
+-    if (ccw == 0.0f)
++    *end_edge = next;
++    while (cut_count)
++        d2d_cdt_destroy_edge(cdt, &cut[--cut_count]);
++    free(cut);
++
++    return TRUE;
++}
++
++static BOOL d2d_cdt_find_vertex_edge(const struct d2d_cdt *cdt, size_t vertex, struct d2d_cdt_edge_ref *edge)
++{
++    size_t k;
++
++    for (k = 0; k < cdt->edge_count; ++k)
+     {
+-        *end_edge = next;
+-        return;
+-    }
++        if (cdt->edges[k].flags & D2D_CDT_EDGE_FLAG_FREED)
++            continue;
+ 
+-    if (ccw > 0.0f)
+-        d2d_cdt_edge_next_left(cdt, &next, &next);
++        edge->idx = k;
++        edge->r = 0;
+ 
+-    d2d_cdt_edge_sym(&next, &next);
+-    d2d_cdt_cut_edges(cdt, end_edge, &next, start_vertex, end_vertex);
+-    d2d_cdt_destroy_edge(cdt, &next);
++        if (d2d_cdt_edge_origin(cdt, edge) == vertex)
++            return TRUE;
++        d2d_cdt_edge_sym(edge, edge);
++        if (d2d_cdt_edge_origin(cdt, edge) == vertex)
++            return TRUE;
++    }
++
++    return FALSE;
+ }
+ 
+ static BOOL d2d_cdt_insert_segment(struct d2d_cdt *cdt, struct d2d_geometry *geometry,
+@@ -2289,9 +2340,24 @@
  {
      struct d2d_cdt_edge_ref base_edge, current, new_origin, next, target;
      size_t current_destination, current_origin;
@@ -17,13 +126,15 @@
 +        if (++iterations > 16 * cdt->edge_count + 0x10000)
 +        {
 +            WARN("Iteration limit exceeded, skipping segment.\n");
-+            return TRUE;
++            /* The caller continues from *edge, so it must be a live edge
++             * starting at end_vertex, not a stale one. */
++            return d2d_cdt_find_vertex_edge(cdt, end_vertex, edge);
 +        }
 +
          d2d_cdt_edge_next_origin(cdt, &next, &current);
  
          current_destination = d2d_cdt_edge_destination(cdt, &current);
-@@ -2308,7 +2321,8 @@
+@@ -2309,7 +2375,8 @@
                  == (cdt->vertices[end_vertex].y > cdt->vertices[current_origin].y))
          {
              d2d_cdt_edge_sym(&new_origin, &current);
@@ -33,7 +144,20 @@
          }
  
          if (d2d_cdt_rightof(cdt, end_vertex, &next) && d2d_cdt_leftof(cdt, end_vertex, &current))
-@@ -2331,13 +2345,14 @@
+@@ -2317,7 +2384,11 @@
+             d2d_cdt_edge_next_left(cdt, &base_edge, &current);
+ 
+             d2d_cdt_edge_sym(&base_edge, &base_edge);
+-            d2d_cdt_cut_edges(cdt, &target, &base_edge, d2d_cdt_edge_origin(cdt, origin), end_vertex);
++            if (!d2d_cdt_cut_edges(cdt, &target, &base_edge, d2d_cdt_edge_origin(cdt, origin), end_vertex))
++            {
++                WARN("Failed to cut edges, skipping segment.\n");
++                return d2d_cdt_find_vertex_edge(cdt, end_vertex, edge);
++            }
+             d2d_cdt_destroy_edge(cdt, &base_edge);
+ 
+             if (!d2d_cdt_connect(cdt, &base_edge, &target, &current))
+@@ -2332,24 +2403,24 @@
              if (d2d_cdt_edge_origin(cdt, edge) == end_vertex)
                  return TRUE;
              new_origin = *edge;
@@ -47,7 +171,85 @@
 -            ERR("Triangle not found.\n");
 -            return FALSE;
 +            WARN("Triangle not found, skipping segment.\n");
-+            return TRUE;
++            return d2d_cdt_find_vertex_edge(cdt, end_vertex, edge);
          }
      }
  }
+ 
+ static BOOL d2d_cdt_insert_segments(struct d2d_cdt *cdt, struct d2d_geometry *geometry)
+ {
+-    size_t start_vertex, end_vertex, i, j, k;
++    size_t start_vertex, end_vertex, i, j;
+     struct d2d_cdt_edge_ref edge, new_edge;
+     const struct d2d_figure *figure;
+     const D2D1_POINT_2F *p;
+-    BOOL found;
+ 
+     for (i = 0; i < geometry->u.path.figure_count; ++i)
+     {
+@@ -2366,28 +2437,7 @@
+                 geometry->fill.vertex_count, sizeof(*p), d2d_cdt_compare_vertices);
+         start_vertex = p - cdt->vertices;
+ 
+-        for (k = 0, found = FALSE; k < cdt->edge_count; ++k)
+-        {
+-            if (cdt->edges[k].flags & D2D_CDT_EDGE_FLAG_FREED)
+-                continue;
+-
+-            edge.idx = k;
+-            edge.r = 0;
+-
+-            if (d2d_cdt_edge_origin(cdt, &edge) == start_vertex)
+-            {
+-                found = TRUE;
+-                break;
+-            }
+-            d2d_cdt_edge_sym(&edge, &edge);
+-            if (d2d_cdt_edge_origin(cdt, &edge) == start_vertex)
+-            {
+-                found = TRUE;
+-                break;
+-            }
+-        }
+-
+-        if (!found)
++        if (!d2d_cdt_find_vertex_edge(cdt, start_vertex, &edge))
+         {
+             ERR("Edge not found.\n");
+             return FALSE;
+@@ -3632,19 +3682,32 @@
+     struct d2d_curve_vertex *b;
+     const D2D1_POINT_2F *p[3];
+     struct d2d_figure *figure;
+-    size_t bezier_idx, i;
++    size_t bezier_idx, i, split_budget = 0;
+ 
+     if (!d2d_geometry_get_first_bezier_segment_idx(geometry, &idx_p))
+         return S_OK;
+ 
++    /* Coincident or touching curves never stop overlapping, and every split
++     * creates new segments that can overlap again. Legitimate geometry needs
++     * only a few splits per curve, so cap the total instead of splitting
++     * forever; leftover overlaps only cost a little fill accuracy. */
++    for (i = 0; i < geometry->u.path.figure_count; ++i)
++        split_budget += geometry->u.path.figures[i].bezier_control_count;
++    split_budget = 16 * split_budget + 1024;
++
+     /* Split overlapping bezier control triangles. */
+-    while (d2d_geometry_get_next_bezier_segment_idx(geometry, &idx_p))
++    while (split_budget && d2d_geometry_get_next_bezier_segment_idx(geometry, &idx_p))
+     {
+         d2d_geometry_get_first_bezier_segment_idx(geometry, &idx_q);
+-        while (idx_q.figure_idx < idx_p.figure_idx || idx_q.vertex_idx < idx_p.vertex_idx)
++        while (split_budget && (idx_q.figure_idx < idx_p.figure_idx || idx_q.vertex_idx < idx_p.vertex_idx))
+         {
+             while (d2d_geometry_check_bezier_overlap(geometry, &idx_p, &idx_q))
+             {
++                if (!--split_budget)
++                {
++                    WARN("Bezier overlaps did not resolve, giving up.\n");
++                    break;
++                }
+                 if (fabsf(d2d_geometry_bezier_ccw(geometry, &idx_q)) > fabsf(d2d_geometry_bezier_ccw(geometry, &idx_p)))
+                 {
+                     if (!d2d_geometry_split_bezier(geometry, &idx_q))

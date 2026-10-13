@@ -22,6 +22,15 @@ WINEPREFIX="$WINEPREFIX" winetricks \
     dotnet48 \
     corefonts
 
+# OpenGL über EGL statt GLX (= Wine-Default seit 11.x, hier explizit gesetzt).
+# Unter GLX teilen sich alle Threads EINE Xlib-Verbindung; FLs OpenGL-UI
+# (SmoothAnimation-Threads) und NVIDIAs GL-Lock verklemmen sich dort zum
+# Deadlock - UI friert ein, Audio laeuft weiter. Mit EGL: 0 Deadlocks in
+# 6 Wochen Alltag (vorher bis zu 27 Watchdog-Eingriffe pro Tag).
+WINEPREFIX="$WINEPREFIX" wine reg add "HKCU\\Software\\Wine\\X11 Driver" \
+    /v UseEGL /t REG_SZ /d Y /f >/dev/null 2>&1
+echo "Registry: X11 Driver\\UseEGL = Y (GL-Deadlock-Schutz)"
+
 # ptrace_scope für Wine-Debugging setzen (optional, aber empfohlen)
 if [ -f /proc/sys/kernel/yama/ptrace_scope ]; then
     current=$(cat /proc/sys/kernel/yama/ptrace_scope)

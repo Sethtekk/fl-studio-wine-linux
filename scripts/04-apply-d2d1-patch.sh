@@ -6,8 +6,8 @@
 # d2d_cdt_insert_segment() → FL Studio friert ein beim
 # Öffnen von Plugins wie Serum 2, Ozone 11, etc.
 #
-# DIE LÖSUNG: Eine vorkompilierte d2d1.dll aus Wine 11.9
-# mit dem Fix (Rekursion → Iteration) wird ins Prefix kopiert.
+# DIE LÖSUNG: Eine vorkompilierte d2d1.dll aus Wine 11.19
+# mit dem Fix (Endlosschleifen/Rekursionen begrenzt) wird ins Prefix kopiert.
 # Die Wine-Builtin-Signatur bei Offset 0x40 wird auf 0x00
 # gesetzt, damit Wine sie als "native" DLL lädt.
 # ============================================================
@@ -58,7 +58,7 @@ echo "[3/3] Registry: d2d1 = native,builtin"
 echo ""
 echo "Verifizierung:"
 echo "  MD5:    $(md5sum "$SYS32/d2d1.dll" | cut -d' ' -f1)"
-echo "  Erwartet: 83d47ffb76f5d7248474b6aaa546b46b"
+echo "  Erwartet: 826992aa3b34cc9fd6f232719eb8c3c0"
 echo "  Größe:  $(du -sh "$SYS32/d2d1.dll" | cut -f1)"
 echo ""
 echo "=== d2d1-Patch erfolgreich angewendet! ==="

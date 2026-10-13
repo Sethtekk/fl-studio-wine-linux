@@ -16,8 +16,8 @@ echo "=== Launchers und Desktop-Icons installieren ==="
 # ── FL Studio Launcher ──────────────────────────────────────
 cat > "$HOME/start-flstudio.sh" <<LAUNCHER
 #!/bin/bash
-# FL Studio 2025 unter Wine – stabiler Start
-# d2d1.dll: gepatchte native Version (geometry.c CDT-Fix) in system32
+# FL Studio unter Wine – stabiler Start
+# d2d1.dll: gepatchte native Version (CDT-/Bezier-Fixes, siehe patches/d2d1-geometry-fix.md)
 # Audio: WineASIO via PipeWire-JACK (pw-jack)
 export WINEPREFIX=$WINEPREFIX
 export WINEFSYNC=1
@@ -25,17 +25,26 @@ export WINEESYNC=1
 export WINE_LARGE_ADDRESS_AWARE=1
 export STAGING_AUDIO_PERIOD=10000
 export __GL_THREADED_OPTIMIZATIONS=0
+# GL ueber EGL (Registry UseEGL=Y, Schritt 2) loest den GL-Deadlock; diese Zeile
+# erzwingt NVIDIAs EGL - ohne sie kann glvnd auf Mesa-EGL fallen.
+[ -f /usr/share/glvnd/egl_vendor.d/10_nvidia.json ] && \
+    export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json
 export DXVK_CONFIG_FILE=$HOME/.config/dxvk/dxvk.conf
-export DXVK_ASYNC=1
+# d2d1 schreibt bei Plugin-UIs pro Linie ein fixme (gemessen 11.000 Zeilen/s) -> aus.
+export WINEDEBUG=fixme-all
 export PIPEWIRE_RUNTIME_DIR=/run/user/\$(id -u)
 export JACK_NO_AUDIO_RESERVATION=1
 # Pool-Fix-Waechter: /usr/bin/wineserver muss die gepatchte Version sein (Pool 512->32768),
-# sonst Fehler 1411 "Klasse existiert nicht" bei grossen Projekten. wine-Update ueberschreibt ihn.
-if [ "\$(md5sum /usr/bin/wineserver 2>/dev/null | cut -d' ' -f1)" != "da13506f620709fb5dab7d11186c6a93" ]; then
-    echo "WARNUNG: /usr/bin/wineserver ist NICHT der Pool-Fix (wine-Update?). Fehler 1411 droht."
-    echo "  -> erneut einspielen: bash scripts/08-apply-wineserver-poolfix.sh"
+# sonst Fehler 1411 "Klasse existiert nicht" bei grossen Projekten. Die bekannten Hashes
+# pflegt der Pacman-Hook im Manifest (assets/poolfix-md5.txt).
+if ! awk '{print \$1}' "$REPO_DIR/assets/poolfix-md5.txt" 2>/dev/null \
+        | grep -qx "\$(md5sum /usr/bin/wineserver 2>/dev/null | cut -d' ' -f1)"; then
+    echo "WARNUNG: /usr/bin/wineserver (\$(wine --version)) ist NICHT der Pool-Fix. Fehler 1411 droht."
+    echo "  -> nachholen: sudo bash $REPO_DIR/scripts/pacman-hook-apply.sh"
 fi
-exec pw-jack wine "$WINEPREFIX/drive_c/Program Files/Image-Line/FL Studio 2025/FL64.exe" "\$@"
+FL_EXE="\$(ls -d "$WINEPREFIX/drive_c/Program Files/Image-Line/FL Studio "*/FL64.exe 2>/dev/null | sort -V | tail -1)"
+trap 'wineserver -k' EXIT
+pw-jack wine "\$FL_EXE" "\$@"
 LAUNCHER
 chmod +x "$HOME/start-flstudio.sh"
 echo "[1/4] ~/start-flstudio.sh erstellt."

@@ -1,107 +1,68 @@
 # d2d1 Geometry Fix – Technische Dokumentation
 
-## Problem
+**Datei:** `dlls/d2d1/geometry.c` · **Stand:** Wine 11.19 (2026-10-13) · Upstream-Bug: [60115](https://bugs.winehq.org/show_bug.cgi?id=60115)
 
-**Datei:** `dlls/d2d1/geometry.c`  
-**Funktion:** `d2d_cdt_insert_segment()`  
-**Wine-Version:** 11.9 (und viele frühere)
+Wines Direct2D trianguliert jede gefüllte Pfad-Geometrie (Constrained Delaunay Triangulation, „CDT"). Plugin-Oberflächen, die über Direct2D zeichnen (JUCE-8-Plugins wie Serum 2, Ozone 11 usw.), erzeugen dabei regelmäßig **degenerierte Geometrie**: doppelte oder kollineare Eckpunkte, deckungsgleiche Bézierkurven. Mehrere Stellen in `geometry.c` terminieren bei solchen Eingaben nicht.
 
-Die Funktion `d2d_cdt_insert_segment` ist Teil von Wine's Direct2D 1 Implementation und wird beim Rendern von Vektor-Geometrien aufgerufen. Bei bestimmten Plugin-GUIs (z.B. Serum 2, Ozone 11) mit komplexen oder degenerierten Geometrien (kollineare/duplizierte Eckpunkte) rief sich die Funktion endlos selbst auf, bis der Stack-Speicher erschöpft war.
+**Symptom:** FL Studio friert ein, sobald ein Plugin-Fenster gezeichnet wird. Audio läuft weiter, die GUI ist tot (Main-Thread im Stack-Overflow → Zombie, oder er dreht in einer Endlosschleife). Einziger Ausweg: `wineserver -k`.
 
-**Symptom:** FL Studio friert beim Öffnen eines Plugins komplett ein (kein Crash-Dialog, keine Fehlermeldung). Audio läuft weiter, GUI ist tot. Einziger Ausweg: `wineserver -k`.
+## Die fünf Fehlerstellen
 
-## Ursache
+Gefunden per Live-Debugging (2026-05) bzw. per Fuzzing mit zufälligen degenerierten Pfaden (2026-10, siehe unten).
 
-Die ursprüngliche Implementierung nutzte echte Rekursion:
+| # | Funktion | Fehler (Stock-Wine) | Fix |
+|---|---|---|---|
+| 1 | `d2d_cdt_insert_segment` | Endlos-Rekursion zwischen zwei Ursprüngen A→B→A → Stack-Overflow | Tail-Rekursion → `goto restart` + Iterationslimit `16 * edge_count + 0x10000` |
+| 2 | `d2d_cdt_insert_segment` (Skip-Pfade) | Der bisherige Patch übersprang ein Segment mit `return TRUE`, **ohne `*edge` zu setzen** → der Aufrufer setzte mit einem veralteten/freigegebenen Edge fort → Page-Fault | Skip-Pfade liefern über `d2d_cdt_find_vertex_edge()` einen gültigen Edge am Zielvertex (oder brechen sauber ab) |
+| 3 | `d2d_cdt_cut_edges` | Unbegrenzte (nicht-Tail-)Rekursion bei zyklischer Topologie → Stack-Overflow | Iterativ: gekreuzte Kanten erst sammeln, dann in umgekehrter Reihenfolge löschen (identisch zur Rekursion), Abbruch nach `edge_count` Schritten |
+| 4 | `d2d_cdt_fixup` | Face-Umlauf erreicht den Ursprung nie → Endlosschleife | Abbruch nach `2 * edge_count + 16` Schritten → `FALSE` (wie upstreams „Degenerate face") |
+| 5 | `d2d_geometry_resolve_beziers` | Überlappende Kontrolldreiecke werden endlos halbiert (jeder Split erzeugt neue Überlappungen), Speicher wächst ohne Ende | Gesamt-Budget `16 * Bézier-Anzahl + 1024` Splits pro Geometrie; danach bleibt die Restüberlappung (minimal ungenaue Füllung statt Hänger) |
 
-```c
-// ORIGINAL (problematisch):
-static BOOL d2d_cdt_insert_segment(struct d2d_cdt *cdt, ...)
-{
-    // ... wenn ein bestimmter Zustand eintritt ...
-    return d2d_cdt_insert_segment(cdt, geometry, &new_origin, edge, end_vertex);
-    //     ^^^ REKURSION → Stack Overflow bei degenerierten Geometrien
-}
-```
+Ein abgebrochener Pfad führt immer in einen bestehenden Fehlerpfad: Entweder wird ein Segment übersprungen oder die Füllung dieser einen Geometrie verworfen (`E_FAIL`, Geometrie wird nicht gefüllt). Nie ein Absturz, nie ein Hänger.
 
-## Fix
+## Speicherleck (upstream behoben, kam mit dem Rebuild)
 
-Die Rekursion wurde durch eine `goto`-basierte Iteration mit einem Sicherheitslimit ersetzt:
+Die alte DLL (Wine 11.9) gab `figure->vertex_types` nie frei. Gemessen: **+17,5 KB pro Pfad-Geometrie**, mit der neuen DLL 0. Bei Plugin-UIs, die pro Frame Geometrien neu bauen, war das ein Dauerleck, solange das Fenster offen war.
 
-```c
-// GEPATCHT (stabil):
-static BOOL d2d_cdt_insert_segment(struct d2d_cdt *cdt, ...)
-{
-    unsigned int iterations = 0;
+## Verifikation (2026-10-13)
 
-restart:
-    // ... Iterationsguard ...
-    if (++iterations > 16 * cdt->edge_count + 0x10000)
-    {
-        WARN("Iteration limit exceeded, skipping segment.\n");
-        return TRUE;  // statt rekursivem Aufruf → Segment überspringen
-    }
+**Fuzzing** — zufällige Pfade auf einem 6×6-Raster (viele Duplikate/Kollinearitäten), 1–4 Figuren, Linien + Béziers, beide Füllmodi:
 
-    // ... wenn ein bestimmter Zustand eintritt ...
-    origin = &new_origin;
-    goto restart;  // statt: return d2d_cdt_insert_segment(...)
-}
-```
+| DLL | Ergebnis |
+|---|---|
+| Stock Wine 11.19 (builtin) | Stack-Overflows und Hänger in jedem 10.000er-Block |
+| Alte Patch-DLL (Wine 11.9) | Hänger in jedem 10.000er-Block (erster bei Seed 940) |
+| **Neue Patch-DLL (Wine 11.19)** | **240.000 Seeds: 0 Hänger, 0 Abstürze** |
 
-## Anwenden auf eine neue Wine-Version
-
-Falls du auf Wine 12.x oder neuer upgradesd:
-
-1. Wine-Quellcode herunterladen:
-   ```bash
-   wget https://dl.winehq.org/wine/source/12.x/wine-12.X.tar.xz
-   tar xf wine-12.X.tar.xz
-   cd wine-12.X
-   ```
-
-2. `dlls/d2d1/geometry.c` öffnen und die Funktion `d2d_cdt_insert_segment` finden:
-   ```bash
-   grep -n "d2d_cdt_insert_segment" dlls/d2d1/geometry.c
-   ```
-
-3. Alle rekursiven `return d2d_cdt_insert_segment(...)` Aufrufe durch `goto restart` ersetzen.
-   Einen `iterations`-Zähler und das Guard-Limit hinzufügen (wie im Fix oben).
-
-4. Neu kompilieren:
-   ```bash
-   ./configure --enable-win64
-   make -j$(nproc) dlls/d2d1/x86_64-windows/d2d1.dll
-   ```
-
-5. Patch anwenden:
-   ```bash
-   cp dlls/d2d1/x86_64-windows/d2d1.dll "$WINEPREFIX/drive_c/windows/system32/d2d1.dll"
-   bash scripts/04-apply-d2d1-patch.sh
-   ```
+**Wine-Testsuite** `dlls/d2d1/tests` (17.475 Einzeltests): Stock und gepatcht liefern **identische** Ergebnisse → keine Regression bei korrekter Geometrie.
 
 ## Die vorkompilierte DLL
 
-`assets/d2d1.dll.patched` ist die für **Wine 11.9, x86_64** kompilierte Version.
-- **MD5:** `83d47ffb76f5d7248474b6aaa546b46b`
-- **Größe:** 5.8 MB
-- **Basis:** Wine Staging 11.9-1.1
+`assets/d2d1.dll.patched` — Wine Staging 11.19, x86_64, Builtin-Signatur bei 0x40 genullt.
+- **MD5:** `826992aa3b34cc9fd6f232719eb8c3c0`
+- d2d1 ist eine reine PE-DLL; sie funktioniert auch unter anderen Wine-Versionen. Neu bauen lohnt sich, wenn upstream in `dlls/d2d1/` Fehler behebt (wie das Leck oben).
 
-## Versions-Kompatibilität
-
-| Wine-Version | Status | Hinweis |
-|--------------|--------|---------|
-| 11.9 | ✅ getestet | Original-Build, läuft produktiv |
-| 11.10 | ✅ verifiziert | **Upstream hat `d2d1` in 11.10 nicht verändert** – das gesamte `d2d1`-Verzeichnis ist identisch zu 11.9, einziger Unterschied ist dieser Patch. Die 11.9-DLL bleibt gültig; `d2d1-geometry-fix.patch` wendet sich byte-sauber auf den 11.10-Quellbaum an (verifiziert per MD5-Vergleich). |
-
-Bei einem Update auf **11.10** ist daher **kein Neu-Kompilieren nötig** – die vorhandene `d2d1.dll.patched` funktioniert weiter, da sie quellgleich ist.
-
-Erst bei einem größeren Wine-Upgrade, das tatsächlich Änderungen an `dlls/d2d1/` mitbringt, muss neu gebaut werden. Vorgehen zum Prüfen, ob sich etwas geändert hat:
+## Neu bauen für eine neue Wine-Version
 
 ```bash
-# d2d1-Verzeichnis der neuen Version mit der alten vergleichen
+# Quellbaum (bei Staging: patchinstall vorher), dann:
+cd wine-X.Y && patch -p1 < .../patches/d2d1-geometry-fix.patch
+mkdir ../build && cd ../build && ../wine-X.Y/configure --enable-win64
+make -j$(nproc) dlls/d2d1/x86_64-windows/d2d1.dll
+cp dlls/d2d1/x86_64-windows/d2d1.dll .../assets/d2d1.dll.patched
+bash .../scripts/04-apply-d2d1-patch.sh   # kopiert + nullt 0x40 + DllOverride
+```
+
+Prüfen, ob upstream d2d1 geändert hat (dann lohnt der Rebuild):
+
+```bash
 diff -rq wine-ALT/dlls/d2d1/ wine-NEU/dlls/d2d1/ \
      --exclude="*.o" --exclude="*.dll" --exclude="Makefile" \
      --exclude="version.res" --exclude="x86_64-windows"
 ```
 
-Zeigt der Vergleich nur Unterschiede in `geometry.c` (= dein Patch), ist kein Rebuild nötig.
+Zwischen 11.9 und 11.19 hat upstream u. a. `device.c`, `effect.c`, `command_list.c` geändert und `sprite_batch.c` ergänzt — die alte DLL war also zehn Versionen hinterher.
+
+## Bekannte Restgrenze
+
+`d2d_device_context_DrawGeometry` ignoriert Strichstile (Strichelung, runde Enden/Ecken) — Wine zeichnet sie als durchgezogene Linien mit Standard-Enden. Das ist eine fehlende Funktion in Wine, kein Absturzrisiko. Der Launcher setzt `WINEDEBUG=fixme-all`, weil Wine dazu sonst pro Linie eine fixme-Zeile schreibt (gemessen 11.000 Zeilen/s bei offenem Plugin-Fenster).
