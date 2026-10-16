@@ -56,16 +56,67 @@ chmod +x "$HOME/start-flstudio.sh"
 echo "[1/4] ~/start-flstudio.sh erstellt."
 
 # ── Splice Launcher ─────────────────────────────────────────
-cat > "$HOME/start-splice.sh" <<LAUNCHER
+cat > "$HOME/start-splice.sh" <<'LAUNCHER'
 #!/bin/bash
 # Splice Desktop App unter Wine – stabiler Start
-export WINEPREFIX=$WINEPREFIX
+# Hinweis: Nutzt dasselbe WINEPREFIX wie FL Studio.
+# Splice und FL Studio können gleichzeitig laufen.
+#
+# Selbstheilend (2026-10-16):
+#  1) app.asar: Conveyor-Migration abgeschaltet (onMigrationReady -> return).
+#     Sonst beendet sich Splice nach 10 Min Leerlauf, startet den Conveyor-
+#     Installer (scheitert unter Wine = Fehlermeldung) und setzt upgradeState,
+#     wodurch der naechste Start haengt. Original: app.asar.orig
+#  2) appState.json: upgradeState=null + conveyorMigration.isComplete=true
+export WINEPREFIX=__WINEPREFIX__
 export WINEFSYNC=1
 export WINEESYNC=1
 export WINE_LARGE_ADDRESS_AWARE=1
 export WINEDEBUG=-all
-exec wine "$WINEPREFIX/drive_c/users/$WINE_USER/AppData/Local/splice/Splice.exe"
+
+LOCAL="$WINEPREFIX/drive_c/users/__WINE_USER__/AppData/Local"
+APPSTATE="$LOCAL/SpliceSettings/appState.json"
+
+# Nicht doppelt starten (laufende Instanz holt sich Splice selbst nach vorn)
+if ! pgrep -f 'Local\\splice\\app-.*Splice.exe$' >/dev/null 2>&1; then
+    python3 - "$APPSTATE" "$LOCAL/splice" <<'PY'
+import json, sys, glob, os, shutil
+appstate, splice_dir = sys.argv[1], sys.argv[2]
+
+# 1) Conveyor-Migration im App-Code abschalten (gleich lange Ersetzung)
+old = b'onMigrationReady(){Ar.log.info("Migration ready."),'
+new = b'onMigrationReady(){return Ar.log.info("noConveyo");'
+for asar in glob.glob(os.path.join(splice_dir, "app-*", "resources", "app.asar")):
+    data = open(asar, "rb").read()
+    if data.count(old) == 1:
+        if not os.path.exists(asar + ".orig"):
+            shutil.copy2(asar, asar + ".orig")
+        open(asar, "wb").write(data.replace(old, new))
+        print("splice: Conveyor-Patch gesetzt:", asar)
+
+# 2) appState.json reparieren
+try:
+    with open(appstate, encoding="utf-8") as f:
+        d = json.load(f)
+except (OSError, ValueError):
+    sys.exit(0)
+cm = d.get("conveyorMigration")
+if d.get("upgradeState") is not None or not (isinstance(cm, dict) and cm.get("isComplete") is True):
+    shutil.copy2(appstate, appstate + ".bak-autostart")
+    d["upgradeState"] = None
+    if isinstance(cm, dict):
+        cm["isComplete"] = True
+    else:
+        d["conveyorMigration"] = {"isComplete": True}
+    with open(appstate, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, separators=(",", ":"))
+    print("splice: appState.json repariert")
+PY
+fi
+
+exec wine "$LOCAL/splice/Splice.exe"
 LAUNCHER
+sed -i -e "s|__WINEPREFIX__|$WINEPREFIX|g" -e "s|__WINE_USER__|$WINE_USER|g" "$HOME/start-splice.sh"
 chmod +x "$HOME/start-splice.sh"
 echo "[2/5] ~/start-splice.sh erstellt."
 
