@@ -46,7 +46,7 @@ Distribution-specific notes (what gets installed, from where): **[docs/installat
 
 "Installer tested" = the package step installs a working Wine in a clean container; the rest of the setup is distribution-independent. FL Studio itself has been run day-to-day on CachyOS with KDE Plasma 6 (Wayland) and an NVIDIA RTX 3080. **Reports from other setups are very welcome** – open an issue with the output of `bash scripts/doctor.sh`.
 
-**GPU:** NVIDIA (proprietary driver), AMD and Intel all work through Vulkan (DXVK). The EGL settings below matter mostly for NVIDIA.
+**GPU:** NVIDIA (proprietary driver), AMD and Intel all work through Vulkan (DXVK). The EGL settings below matter mostly for NVIDIA. The d2d1 fix has been confirmed independently on an AMD RX 9070 XT with Mesa/RADV ([Wine bug 60115](https://bugs.winehq.org/show_bug.cgi?id=60115#c3)).
 
 ## What gets fixed
 

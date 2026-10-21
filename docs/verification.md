@@ -16,7 +16,7 @@ Levels of evidence:
 | Change | Level | Evidence |
 |---|---|---|
 | EGL instead of GLX (GL deadlock) | daily FL use | watchdog log: 88 deadlocks up to 2026-08-31 22:18, none since (more than 130 sessions) |
-| d2d1 fixes (hangs/crashes) | isolated + FL session | fuzzer, Wine test suite; FL sessions with Serum 2 without a crash |
+| d2d1 fixes (hangs/crashes) | isolated + FL session + independent | fuzzer, Wine test suite; FL sessions with Serum 2 without a crash; confirmed by a second user on different hardware, see below |
 | d2d1 memory leak | isolated + FL session | test program; 15 min of FL with Serum 2 open: +0.37 MB/min |
 | d2d1 performance (hollow figures) | measured in FL | benchmark 11× faster, **no measurable effect with Serum 2 in FL** (55 % vs. 56 %) |
 | nih-plug crash (baseview) | FL session | Spectral Compressor, Diopser, Crisp opened and rendered in FL, alpha fallback logged 3×, no crash |
@@ -121,6 +121,27 @@ Serum's interface costs about 40 percentage points of one core; the hollow fix d
 - **MIDI start-up error (fixed):** `PipeWire-System - input` and `PipeWire-RT-Event - input` were enabled as MIDI inputs and failed on every start (two "the driver could not be started" dialogs, the MIDI window opens). Both disabled in FL (`HKCU\Software\Image-Line\FL Studio 26\Devices\MIDI input\… Enabled=0`); the next start showed no dialog.
 - **Rendering glitch (open):** when a plugin window with Vulkan/D3D content (Serum 2) is moved inside FL, the old image stays at the old position until the plugin redraws. During playback it corrects itself immediately; when idle only on interaction. Suspected cause: Wine doesn't trigger a redraw after the client surface is moved.
 
+## Independent confirmation of the d2d1 fix (2026-10-21)
+
+A second user who had hit the same crash ([Wine bug 60115, comments 1 and 3](https://bugs.winehq.org/show_bug.cgi?id=60115#c3)) built `d2d1.dll` from `patches/d2d1-geometry-fix.patch` themselves - applied to vanilla wine-11.19 without fuzz - and used it in a different setup:
+
+| | Here | Second user |
+|---|---|---|
+| GPU / driver | NVIDIA RTX 3080, proprietary 615 | AMD RX 9070 XT, Mesa/RADV |
+| Wine | wine-staging 11.19/11.20 | kron4ek wine 11.15 (Bottles) |
+| FL Studio | 2026 | 2025 |
+| DLL | prebuilt from this repository | built from source |
+
+Their results before → after the patch:
+
+- Serum 2, LFO modulating an EQ parameter while a note plays: stack overflow → fixed
+- Serum 2, dragging the wavetable position: crash → fixed
+- Serum 1, opening the plugin window: immediate crash → opens normally
+- Bridging the plugin in FL did not help before the patch (in our own test from 2026-05, bridging even froze FL immediately)
+- No visible rendering artefacts
+
+This is a user report, not our measurement. With a second, unrelated system it indicates that the defect and the fix don't depend on the GPU driver, the Wine build or the FL version.
+
 ## Findings 2026-10-18/19
 
 **Gopher / WebView2 (2026-10-19, one incident):** after opening Gopher in FL Studio 2026, FL stopped responding while audio kept playing. FL's UI thread was not blocked but busy (~20 % of a core) in a loop of wineserver requests; the wineserver used ~80 % of a core. The unix-side stack of the UI thread showed window callbacks nested five levels deep (`win32u` ↔ `ntdll`). No Gopher window existed. Ending the `msedgewebview2.exe` processes brought the wineserver down to ~10 % and the UI thread back to normal OpenGL drawing; FL stayed open. The Win32 call behind the loop was not identified. For comparison, a normally running FL measured later showed ~13 % wineserver CPU and ~23,000 context switches/s of the UI thread, so context switches alone don't identify this case.
@@ -134,3 +155,4 @@ Serum's interface costs about 40 percentage points of one core; the hollow fix d
 - Wait for the first real wine-staging update with a pre-build.
 - JUCE OpenGL plugins (Kickstart 2, Youlean, GrapHack, iZotope): pixel-format mechanism checked, interfaces not tested one by one in the test host.
 - Gopher freeze: identify the Win32 call behind the message loop; seen only once so far.
+- d2d1 upstream: split the patch into one commit per defect, add regression tests from fuzzer seeds and open a merge request on gitlab.winehq.org (announced in [bug 60115, comment 4](https://bugs.winehq.org/show_bug.cgi?id=60115#c4)).

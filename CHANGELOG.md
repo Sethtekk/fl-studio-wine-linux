@@ -5,6 +5,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Findings from daily use (2026-10-21)
+- d2d1 fix independently confirmed on AMD RX 9070 XT / Mesa/RADV with kron4ek wine 11.15 and FL Studio 2025, built from source by a second user (Wine bug 60115); verification report, plugin list and README updated.
 - Troubleshooting: FL freezing after opening Gopher (WebView2 panel) and how to recover without losing the project.
 - Troubleshooting and plugin list: ZGameEditor Visualizer keeps FL's UI thread busy even with its window closed.
 - FL launcher: sources `~/.config/fl-studio-wine/pre-start.sh` before starting FL, for setup-specific steps such as fixed routing that `git pull` must not overwrite.

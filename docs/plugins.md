@@ -6,8 +6,8 @@ Tested with wine-staging 11.19, EGL, NVIDIA 615, KDE Plasma 6 (Wayland/XWayland)
 
 | Plugin | Format | Graphics | Status | Notes |
 |---|---|---|---|---|
-| Serum 2 | VST3 | Direct2D (JUCE 8) | ✅ runs in FL | Needs the d2d1 patch. Wine draws stroke styles (round caps, dashes) as plain lines. |
-| Serum 1 | VST2 | GDI+ / D3D | ✅ GUI test | First draw takes ~1 s (DXVK initialisation) |
+| Serum 2 | VST3 | Direct2D (JUCE 8) | ✅ runs in FL | Needs the d2d1 patch. Also confirmed by a second user on AMD/RADV ([bug 60115, comment 3](https://bugs.winehq.org/show_bug.cgi?id=60115#c3)). Wine draws stroke styles (round caps, dashes) as plain lines. |
+| Serum 1 | VST2 | GDI+ / D3D | ✅ GUI test | First draw takes ~1 s (DXVK initialisation). A second user reports that Serum 1 crashed as soon as its window opened on their system and works with the d2d1 patch ([comment 3](https://bugs.winehq.org/show_bug.cgi?id=60115#c3)); not reproduced here. |
 | CamelCrusher | VST2 | GDI+ | ✅ GUI test | |
 | Spectral Compressor | VST3/CLAP | OpenGL (nih-plug/vizia) | ⚠️ rebuild needed | The official build crashes under EGL, see [nih-plug](#nih-plug) |
 | Diopser | VST3/CLAP | OpenGL (nih-plug/vizia) | ⚠️ rebuild needed | same as above |
