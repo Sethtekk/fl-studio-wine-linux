@@ -1,13 +1,13 @@
 #!/bin/bash
 # ============================================================
-# Schritt 8: wineserver-Pool-Fix manuell einspielen
+# Step 8: install the wineserver pool fix manually
 #
-# Ersetzt /usr/bin/wineserver durch eine Variante mit Shared-Session-
-# Pool 32768 (statt 512) - verhindert Fehler 1411 bei großen Projekten.
-# Fehlt das Binary für die installierte Wine-Version, wird es gebaut.
-# Mit Protokolltest und automatischem Rollback.
+# Replaces /usr/bin/wineserver with a build whose shared session pool
+# holds 32768 objects instead of 512 - prevents error 1411 in large
+# projects. If there is no binary for the installed Wine version yet,
+# it is built. Includes a protocol test and automatic rollback.
 #
-# Für den Dauerbetrieb besser einmalig die Automatik installieren:
+# For permanent use, install the automation once instead:
 #   sudo bash scripts/install-fl-wine-automation.sh
 # ============================================================
 exec sudo bash "$(dirname "$0")/pacman-hook-apply.sh" --build

@@ -18,7 +18,7 @@ This page explains what `install.sh` does on your distribution, and how to do it
 - About 5 GB of free disk space.
 - Run everything as your **normal user**, not with `sudo` – the scripts ask for the password where needed.
 
-Contents: [Arch](#arch-cachyos-endeavouros-manjaro) · [Ubuntu / Mint / Pop!_OS](#ubuntu-linux-mint-popos-zorin) · [Debian](#debian) · [Fedora](#fedora-nobara) · [openSUSE](#opensuse-tumbleweed) · [Other](#other-distributions) · [Steps in detail](#the-steps-in-detail)
+Contents: [Arch](#arch-cachyos-endeavouros-manjaro) · [Ubuntu / Mint / Pop!_OS](#ubuntu-linux-mint-pop_os-zorin) · [Debian](#debian) · [Fedora](#fedora-nobara) · [openSUSE](#opensuse-tumbleweed) · [Other](#other-distributions) · [Steps in detail](#the-steps-in-detail)
 
 ---
 

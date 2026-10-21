@@ -1,55 +1,55 @@
-# Audio: WineASIO und PipeWire
+# Audio: WineASIO and PipeWire
 
-Ohne ASIO-Treiber stellt Wine FL Studio nur zwei Eingänge über WASAPI zur Verfügung. Mit [WineASIO](https://github.com/wineasio/wineasio) und PipeWires JACK-Schnittstelle sind alle Kanäle eines Interfaces nutzbar.
+Without an ASIO driver, Wine only gives FL Studio two inputs via WASAPI. With [WineASIO](https://github.com/wineasio/wineasio) and PipeWire's JACK interface, every channel of your audio interface is available.
 
-## Einrichtung
-
-```bash
-bash scripts/07-setup-wineasio.sh     # installiert/baut WineASIO bei Bedarf selbst
-# andere Werte: ASIO_INPUTS=4 ASIO_OUTPUTS=4 ASIO_BUFFER=512 bash scripts/07-setup-wineasio.sh
-```
-
-Das Skript installiert WineASIO (Arch: AUR, sonst Bau aus dem Quellcode), registriert es im Prefix und setzt Ein-/Ausgangszahl und Buffergröße (Standard 16/16, 512 Samples). Der Launcher `flstudio-wine` startet FL dann über `pw-jack` und fixiert das PipeWire-Quantum auf die Buffergröße (siehe unten).
-
-In FL: *Options → Audio Settings → Device → WineASIO*. Input-Monitoring im Mixer deaktivieren, um Rückkopplungen zu vermeiden.
-
-## Wiedergabe zu langsam oder zu schnell (Tonhöhe korrekt)
-
-**Symptom:** Ein Sample von 3 s braucht z. B. 12 s, oder läuft viel zu schnell; die Tonhöhe stimmt. Betrifft Projekt und Browser-Vorschau, der Faktor kann sich zwischen Starts ändern.
-
-**Ursache:** WineASIO arbeitet mit fester Buffergröße und meldet sie FL. Weicht das PipeWire-Quantum davon ab, läuft FL um genau dieses Verhältnis falsch:
-
-- Interface erzwingt größeres Quantum (z. B. `period-size = 2048`) → 2048 / 512 = 4× zu langsam
-- FL zieht das Quantum nach einer Neuverhandlung nach unten (z. B. 128) → 4× zu schnell
-- Stehen 44,1 und 48 kHz in `allowed-rates`, wechselt zusätzlich die Rate
-
-**Diagnose:**
+## Setup
 
 ```bash
-pw-top -b -n 4                                  # RATE/QUANT am Treiber-Node
-grep -i buffersize "$WINEPREFIX/user.reg"       # WineASIO-Buffer
+bash scripts/07-setup-wineasio.sh     # installs/builds WineASIO itself if needed
+# other values: ASIO_INPUTS=4 ASIO_OUTPUTS=4 ASIO_BUFFER=512 bash scripts/07-setup-wineasio.sh
 ```
 
-Gleiche Tonhöhe → Quantum/Buffer-Mismatch. Veränderte Tonhöhe → echtes Sample-Rate- oder Clock-Problem.
+The script installs WineASIO (Arch: AUR, otherwise built from source), registers it in the prefix and sets the number of inputs/outputs and the buffer size (default 16/16, 512 samples). The `flstudio-wine` launcher then starts FL through `pw-jack` and pins the PipeWire quantum to the buffer size (see below).
 
-**Lösung:** Rate und Quantum zur Laufzeit hart fixieren – das macht `flstudio-wine` automatisch beim Start und setzt es beim Beenden zurück. Ein bloßer `max-quantum`-Deckel genügt nicht, und `default.clock.force-*` in einer Konfigurationsdatei wird von PipeWire **nicht** übernommen (nur zur Laufzeit wirksam).
+In FL: *Options → Audio Settings → Device → WineASIO*. Turn off input monitoring in the mixer to avoid feedback.
 
-Von Hand (Wert `0` hebt auf):
+## Playback too slow or too fast (pitch is correct)
+
+**Symptom:** A 3-second sample takes 12 seconds, for example, or plays far too fast; the pitch is right. This affects both the project and the browser preview, and the factor can change between starts.
+
+**Cause:** WineASIO works with a fixed buffer size and reports it to FL. If the PipeWire quantum differs, FL runs off by exactly that ratio:
+
+- The interface forces a larger quantum (e.g. `period-size = 2048`) → 2048 / 512 = 4× too slow
+- After a renegotiation, FL pulls the quantum down (e.g. to 128) → 4× too fast
+- If both 44.1 and 48 kHz are listed in `allowed-rates`, the rate can change as well
+
+**Diagnosis:**
 
 ```bash
-pw-metadata -n settings 0 clock.force-quantum 512     # = WineASIO-Buffergröße
-pw-metadata -n settings 0 clock.force-rate    48000   # = aktuelle Rate
+pw-top -b -n 4                                  # RATE/QUANT on the driver node
+grep -i buffersize "$WINEPREFIX/user.reg"       # WineASIO buffer
 ```
 
-## Webcam-Mikrofon auf FL-Eingang 1
+Same pitch → quantum/buffer mismatch. Changed pitch → a real sample-rate or clock problem.
 
-WineASIO verbindet bei `Connect to hardware = 1` alle physischen JACK-Capture-Ports – auch USB-Webcam-Mikrofone. Diese landen zusätzlich auf `FL64:in_1`, werden mit dem Interface-Signal summiert und, wenn sie nur 48 kHz beherrschen, in den 44,1-kHz-Graphen resampelt. Im Journal erscheint dann:
+**Fix:** pin the rate and quantum at runtime - `flstudio-wine` does this automatically on start and resets it on exit. Just capping `max-quantum` is not enough, and PipeWire does **not** pick up `default.clock.force-*` from a config file (it only works at runtime).
+
+By hand (`0` removes the setting):
+
+```bash
+pw-metadata -n settings 0 clock.force-quantum 512     # = WineASIO buffer size
+pw-metadata -n settings 0 clock.force-rate    48000   # = current rate
+```
+
+## Webcam microphone on FL input 1
+
+With `Connect to hardware = 1`, WineASIO connects every physical JACK capture port - including USB webcam microphones. Those end up on `FL64:in_1` as well, get summed with the interface signal and, if they only support 48 kHz, are resampled into the 44.1 kHz graph. The journal then shows:
 
 ```
 spa.alsa: hw:N,0c: follower delay:… resample:1, resync
 ```
 
-**Variante A – WirePlumber-Regel:** dem Gerät `node.physical` entziehen.
+**Option A – WirePlumber rule:** take `node.physical` away from the device.
 
 ```bash
 cat > ~/.config/wireplumber/wireplumber.conf.d/51-webcam-not-physical.conf << 'EOF'
@@ -63,9 +63,9 @@ EOF
 systemctl --user restart wireplumber
 ```
 
-Nachteil: Bei manchen Geräten (z. B. Logitech Brio) verschwindet das Mikrofon damit auch aus der Geräteauswahl anderer Anwendungen.
+Downside: with some devices (e.g. the Logitech Brio) the microphone then also disappears from the device list of other applications.
 
-**Variante B – im Launcher trennen:** Nach dem Start alle Quellen von `FL64:in_*` lösen, die nicht vom Audio-Interface kommen.
+**Option B – disconnect in the launcher:** after start-up, remove every link to `FL64:in_*` that doesn't come from the audio interface.
 
 ```bash
 IN="alsa_input.usb-<Interface>.pro-input-0"
@@ -75,9 +75,9 @@ pw-link -l \
   | while read -r src dst; do pw-link -d "$src" "$dst"; done
 ```
 
-## Feste Verdrahtung mehrerer Ausgänge
+## Fixed routing for several outputs
 
-Mit dem PipeWire-Profil *Pro Audio* lassen sich FL-Ausgänge gezielt auf Interface-Kanäle legen (z. B. Out 3/4 als Sidechain-Trigger für Hardware). `pw-jack` verbindet beim Start oft nur Out 1/2; ein Block im Launcher wartet auf die FL-Ports und setzt die Links mit `pw-link`. Interface-Profil vorher setzen:
+With the PipeWire *Pro Audio* profile you can route FL outputs to specific interface channels (e.g. outputs 3/4 as a sidechain trigger for outboard gear). On start-up `pw-jack` often only connects outputs 1/2; a block in the launcher waits for FL's ports and creates the links with `pw-link`. Set the interface profile first:
 
 ```bash
 wpctl set-profile <device-id> <pro-audio-index>

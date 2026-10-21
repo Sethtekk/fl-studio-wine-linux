@@ -1,5 +1,5 @@
 [Unit]
-Description=FL Studio: wineserver-Pool-Fix regelmäßig prüfen
+Description=FL Studio: check the wineserver pool fix regularly
 
 [Timer]
 OnBootSec=5min

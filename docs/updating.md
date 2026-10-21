@@ -1,38 +1,38 @@
 # Updates
 
-## Was ein `pacman -Syu` betrifft
+## What a `pacman -Syu` affects
 
-| Komponente | Ort | Bei Wine-Update |
+| Component | Location | On a Wine update |
 |---|---|---|
-| `d2d1.dll` | `$WINEPREFIX/drive_c/windows/system32/` | bleibt erhalten; der Launcher stellt sie bei Abweichung wieder her |
-| `wineserver` (Pool-Fix) | `/usr/bin/wineserver` | wird überschrieben → Hook bzw. Wartungsdienst spielt den Fix wieder ein |
-| Registry (`UseEGL`, `DllOverrides`) | Prefix | bleibt erhalten |
-| Launcher | `~/.local/bin/flstudio-wine` → `scripts/run-flstudio.sh` | bleibt erhalten; `git pull` aktualisiert ihn |
+| `d2d1.dll` | `$WINEPREFIX/drive_c/windows/system32/` | stays; the launcher restores it if it has changed |
+| `wineserver` (pool fix) | `/usr/bin/wineserver` | is overwritten → the hook or the maintenance service reinstalls the fix |
+| Registry (`UseEGL`, `DllOverrides`) | prefix | stays |
+| Launcher | `~/.local/bin/flstudio-wine` → `scripts/run-flstudio.sh` | stays; `git pull` updates it |
 
-## Update-Automatik (nur Arch, optional)
+## Update automation (Arch only, optional)
 
-Der Pool-Fix ist nur bei sehr großen Projekten nötig (Fehler 1411). Einmalig installieren:
+The pool fix is only needed for very large projects (error 1411). Install it once:
 
 ```bash
-sudo bash scripts/install-fl-wine-automation.sh          # --remove zum Entfernen
+sudo bash scripts/install-fl-wine-automation.sh          # --remove to uninstall
 ```
 
-| Baustein | Wann | Was |
+| Part | When | What |
 |---|---|---|
-| Pacman-Hook `zz-wineserver-poolfix.hook` | nach jedem `wine-staging`-Update | spielt das vorhandene Pool-Fix-Binary **offline** ein; fehlt es, wird der Wartungsdienst angestoßen |
-| `wineserver-poolfix-maintain.timer` | 5 min nach dem Booten, danach alle 3 h | **Reparatur**, falls `/usr/bin/wineserver` kein Pool-Fix ist; **Vorab-Build** für in den Repos anstehende wine-staging-Versionen (`checkupdates`) |
-| Launcher | bei jedem FL-Start | stellt eine ersetzte `d2d1.dll` wieder her, warnt per Desktop-Benachrichtigung bei fehlendem Pool-Fix |
+| pacman hook `zz-wineserver-poolfix.hook` | after every `wine-staging` update | installs the existing pool-fix binary **offline**; if there is none, it triggers the maintenance service |
+| `wineserver-poolfix-maintain.timer` | 5 min after boot, then every 3 h | **repair** if `/usr/bin/wineserver` is not the pool fix; **pre-build** for wine-staging versions waiting in the repos (`checkupdates`) |
+| Launcher | on every FL start | restores a replaced `d2d1.dll` and shows a desktop notification if the pool fix is missing |
 
-**Warum nicht im Hook bauen?** Während großer pacman-Transaktionen ist das Netz oft kurz weg – etwa wenn NetworkManager, systemd oder ein VPN-Daemon im selben Lauf aktualisiert werden. Der Download der Wine-Quellen schlug deshalb im Hook wiederholt fehl. Mit dem Vorab-Build liegt das Binary in der Regel schon bereit, bevor das Update installiert wird; andernfalls holt der Wartungsdienst den Build nach der Transaktion nach (wartet auf die pacman-Sperre und auf Netz, wiederholt bei Fehlschlag nach 20 Minuten, zusätzlich bei jedem Timer-Lauf).
+**Why not build in the hook?** During large pacman transactions the network is often down for a moment - for example when NetworkManager, systemd or a VPN daemon are updated in the same run. Downloading the Wine sources from inside the hook failed repeatedly for that reason. With the pre-build, the binary is usually ready before the update is installed; otherwise the maintenance service builds it after the transaction (it waits for the pacman lock and for the network, retries after 20 minutes on failure, and again on every timer run).
 
-Jedes Einspielen läuft gleich ab:
+Every installation follows the same steps:
 
-1. MD5 gegen `assets/poolfix-md5.txt` prüfen (mehrere Hashes pro Version zulässig, Builds sind nicht bitgleich reproduzierbar),
-2. Stock-Binary versionsbezogen sichern (`/usr/bin/wineserver.stock-<VER>`),
-3. atomar ersetzen (ein laufender wineserver behält seine Datei),
-4. Protokolltest in einem Wegwerf-Prefix; schlägt er fehl, wird der Stock-wineserver wiederhergestellt.
+1. check the MD5 against `assets/poolfix-md5.txt` (several hashes per version are allowed, because builds are not bit-for-bit reproducible),
+2. back up the stock binary per version (`/usr/bin/wineserver.stock-<VER>`),
+3. replace it atomically (a running wineserver keeps its file),
+4. run a protocol test in a throwaway prefix; if it fails, the stock wineserver is restored.
 
-Builds laufen als Besitzer des Repositorys mit niedriger CPU- und IO-Priorität. Status und Logs:
+Builds run as the owner of the repository with low CPU and I/O priority. Status and logs:
 
 ```bash
 systemctl list-timers wineserver-poolfix-maintain.timer
@@ -40,32 +40,32 @@ journalctl -u wineserver-poolfix-maintain.service
 ls ~/wine-build/poolfix-build-*.log
 ```
 
-Manuell (ohne Automatik): `bash scripts/08-apply-wineserver-poolfix.sh`
+By hand (without the automation): `bash scripts/08-apply-wineserver-poolfix.sh`
 
-## d2d1 neu bauen
+## Rebuilding d2d1
 
-Die `d2d1.dll` ist eine reine PE-DLL und läuft auch unter neueren Wine-Versionen weiter. Neu bauen lohnt sich, wenn upstream `dlls/d2d1/` ändert:
+`d2d1.dll` is a pure PE DLL and keeps working with newer Wine versions. Rebuilding is worthwhile when upstream changes `dlls/d2d1/`:
 
 ```bash
-diff -rq wine-ALT/dlls/d2d1 wine-NEU/dlls/d2d1 \
+diff -rq wine-OLD/dlls/d2d1 wine-NEW/dlls/d2d1 \
      --exclude='*.o' --exclude='*.dll' --exclude=Makefile --exclude=x86_64-windows
 ```
 
-Bauen:
+To build:
 
 ```bash
-cd wine-X.Y && patch -p1 < /pfad/zu/patches/d2d1-geometry-fix.patch
+cd wine-X.Y && patch -p1 < /path/to/patches/d2d1-geometry-fix.patch
 mkdir ../build && cd ../build && ../wine-X.Y/configure --enable-win64
 make -j"$(nproc)" dlls/d2d1/x86_64-windows/d2d1.dll
-cp dlls/d2d1/x86_64-windows/d2d1.dll /pfad/zu/assets/d2d1.dll.patched
-bash /pfad/zu/scripts/04-apply-d2d1-patch.sh
+cp dlls/d2d1/x86_64-windows/d2d1.dll /path/to/assets/d2d1.dll.patched
+bash /path/to/scripts/04-apply-d2d1-patch.sh
 ```
 
-Vor dem Einspielen empfohlen: Wines Testsuite (`make dlls/d2d1/tests/x86_64-windows/d2d1_test.exe`) gegen Stock und Patch vergleichen und `tools/d2d1_fuzz.exe` laufen lassen.
+Recommended before installing: compare Wine's test suite (`make dlls/d2d1/tests/x86_64-windows/d2d1_test.exe`) between stock and patched, and run `tools/d2d1_fuzz.exe`.
 
-## Wiederherstellung
+## Restoring
 
-Nach `wineboot -u` oder einem Prefix-Update kann Wine die builtin-`d2d1.dll` zurückschreiben:
+After `wineboot -u` or a prefix update, Wine may write its builtin `d2d1.dll` back:
 
 ```bash
 bash scripts/restore-d2d1-patch.sh

@@ -20,6 +20,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-Hinweis: Die Patches unter patches/ und die daraus gebauten Binaries unter
-assets/ sind abgeleitete Werke von Wine (LGPL 2.1) bzw. baseview
-(MIT OR Apache-2.0) und stehen unter deren Lizenzen.
+Note: the patches in patches/ and the binaries built from them in assets/
+are derivative works of Wine (LGPL 2.1) or baseview (MIT OR Apache-2.0)
+and are covered by those licenses.

@@ -6,7 +6,6 @@ Thanks for helping FL Studio run better on Linux!
 
 - **Test reports** from distributions and GPUs other than Arch + NVIDIA: open a ["Test report" issue](https://github.com/Sethtekk/fl-studio-wine-linux/issues/new/choose) with the output of `bash scripts/doctor.sh`. Good and bad results both help.
 - **Plugin reports:** which plugins work, which freeze or crash (add them to [docs/plugins.md](docs/plugins.md)).
-- **Translations** of the German documents in `docs/`.
 
 ## Bug reports
 

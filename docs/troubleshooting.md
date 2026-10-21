@@ -46,7 +46,7 @@ Only with very large projects: the wineserver's shared-session pool runs out. On
 | Only 2 inputs / high latency | set up WineASIO: `bash scripts/07-setup-wineasio.sh`, then in FL *Options → Audio Settings → Device → WineASIO* |
 | Playback too slow or too fast, pitch is correct | PipeWire quantum ≠ WineASIO buffer. Start FL with `flstudio-wine` (it pins the quantum). Check with `pw-top`: QUANT must equal the buffer size shown by the doctor |
 | No sound at all with WineASIO | in FL's audio settings pick WineASIO; check `pw-jack` exists (`pipewire-jack` package) |
-| Webcam microphone mixed into input 1 | see [audio.md](audio.md) (German) |
+| Webcam microphone mixed into input 1 | see [audio.md](audio.md#webcam-microphone-on-fl-input-1) |
 | Crackling | raise the buffer: `ASIO_BUFFER=1024 bash scripts/07-setup-wineasio.sh` |
 
 ## Splice

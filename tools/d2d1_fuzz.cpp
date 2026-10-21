@@ -1,3 +1,10 @@
+// Fuzzer for Wine's d2d1 path triangulation (Wine bug 60115).
+// Builds random filled path geometries on a 6x6 grid - lots of duplicate and
+// collinear points, 1-4 figures, lines and Beziers, both fill modes - and
+// closes each one, which runs the triangulation. Stock Wine 11.19 overflowed
+// the stack or hung in every block of 10,000 seeds we tried; the last
+// "seed N" line printed is the culprit.
+// Usage: d2d1_fuzz.exe <first seed> <count> [delay ms before start]
 #include <windows.h>
 #include <d2d1.h>
 #include <stdio.h>

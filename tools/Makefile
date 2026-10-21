@@ -1,9 +1,9 @@
-# Test- und Diagnosewerkzeuge (Windows-Binaries, Cross-Build mit MinGW)
+# Test and diagnostic tools (Windows binaries, cross-built with MinGW)
 #
-#   make            baut alle Werkzeuge nach build/
-#   make CLAP_INC=… Pfad zu den CLAP-Headern (https://github.com/free-audio/clap)
+#   make            builds all tools into build/
+#   make CLAP_INC=… path to the CLAP headers (https://github.com/free-audio/clap)
 #
-# Aufruf unter Wine, z. B.:
+# Run under Wine, e.g.:
 #   wine build/clap_guitest.exe "C:\\Program Files\\Common Files\\CLAP\\Diopser.clap" 10
 #   wine build/vst2_guitest.exe "C:\\VST\\CamelCrusher.dll" 10
 #   WINEDLLOVERRIDES=d2d1=n wine build/d2d1_fuzz.exe 1 10000

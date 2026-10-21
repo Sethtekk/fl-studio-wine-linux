@@ -1,47 +1,49 @@
-# Debugging-Journal: FL Studio unter Wine – vom Freeze zur Lösung
+# Debugging journal: FL Studio under Wine – from freeze to fix
 
-Dieses Dokument beschreibt den vollständigen Debugging-Prozess, der zur Lösung des FL-Studio-Freeze-Problems geführt hat. Es soll nachvollziehbar machen, **warum** der Patch notwendig ist und **wie** wir das Problem identifiziert haben — damit jeder die Lösung verstehen und bei neuen Wine-Versionen adaptieren kann.
+This document describes the full debugging process that led to the fix for FL Studio's freezes. It explains **why** the patch is needed and **how** the problem was tracked down, so that anyone can understand the fix and adapt it to new Wine versions.
+
+Some steps describe the state at the time; where the current scripts do things differently, this is noted.
 
 ---
 
-## Das Ausgangsproblem
+## The original problem
 
-**Symptom:** FL Studio 2025 läuft unter Wine grundsätzlich stabil — bis man in einem zweiten Plugin-Fenster (z.B. Serum 2) Presets durchschaltet. Ab einem bestimmten Punkt friert die gesamte GUI ein. Das Fenster reagiert nicht mehr, kein Klick funktioniert. Interessanterweise läuft der **Audio weiter** — das laufende Projekt produziert weiter Sound, nur die Oberfläche ist tot.
+**Symptom:** FL Studio 2025 runs stable under Wine overall - until you step through presets in a second plugin window (e.g. Serum 2). At some point the whole GUI freezes. The window stops responding and no click does anything. Interestingly, **audio keeps playing** - the running project still makes sound, only the interface is dead.
 
-Einziger Ausweg war immer:
+The only way out was always:
 ```bash
 wineserver -k
 ```
 
 ---
 
-## Phase 1: Was friert eigentlich ein?
+## Phase 1: What actually freezes?
 
-### Beobachtung: Audio läuft, GUI nicht
+### Observation: audio runs, the GUI doesn't
 
-Der erste wichtige Hinweis war, dass Audio weiterläuft. Das bedeutet: nicht der gesamte Wine-Prozess hängt, sondern nur ein bestimmter Thread. Bei FL Studio unter Wine teilen sich FL und alle Plugins **einen einzigen Prozess** — aber Audio läuft in separaten Threads (`audio_client*`).
+The first important clue was that audio kept playing. That means the Wine process as a whole isn't stuck, only one particular thread. Under Wine, FL Studio and all its plugins share **a single process** - but audio runs in separate threads (`audio_client*`).
 
-Schlussfolgerung: Der **Main-Thread** (GUI/Message-Thread) ist blockiert, die Audio-Threads laufen weiter.
+Conclusion: the **main thread** (GUI/message thread) is blocked while the audio threads keep running.
 
-### Linux-Prozess-Status prüfen
+### Checking the Linux process state
 
 ```bash
-# PID von FL64.exe finden
+# Find the PID of FL64.exe
 pgrep -a wine | grep FL64
 
-# Thread-Zustände lesen
+# Read the thread states
 cat /proc/PID/task/*/stat | awk '{print $1, $3}'
 ```
 
-Ergebnis: Der Main-Thread zeigte Status **`R`** (running/spinning) — kein `S` (sleep) wie man es bei einem Deadlock erwarten würde. Der Thread war aktiv, verbrauchte CPU, aber tat nichts Sinnvolles. Das ist das typische Zeichen für eine **Endlosschleife oder endlose Rekursion**.
+Result: the main thread was in state **`R`** (running/spinning) - not `S` (sleeping) as you would expect in a deadlock. The thread was active and using CPU, but doing nothing useful. That is the typical sign of an **infinite loop or unbounded recursion**.
 
 ---
 
-## Phase 2: Was macht der Main-Thread?
+## Phase 2: What is the main thread doing?
 
-### GDB-Backtrace
+### GDB backtrace
 
-Mit `ptrace_scope=0` konnte ein Live-Backtrace des eingefrorenen Prozesses gemacht werden:
+With `ptrace_scope=0`, a live backtrace of the frozen process was possible:
 
 ```bash
 sudo sysctl kernel.yama.ptrace_scope=0
@@ -49,40 +51,40 @@ sudo sysctl kernel.yama.ptrace_scope=0
 gdb -p PID -ex "thread apply all bt" -ex quit 2>/dev/null
 ```
 
-Der Backtrace zeigte hunderte identische Stack-Frames:
+The backtrace showed hundreds of identical stack frames:
 
 ```
 #0  d2d_cdt_insert_segment (cdt=..., geometry=...) at geometry.c:2339
 #1  d2d_cdt_insert_segment (cdt=..., geometry=...) at geometry.c:2339
 #2  d2d_cdt_insert_segment (cdt=..., geometry=...) at geometry.c:2339
 #3  d2d_cdt_insert_segment (cdt=..., geometry=...) at geometry.c:2339
-... (tausende Male wiederholt)
+... (repeated thousands of times)
 ```
 
-**Bingo.** Die Funktion `d2d_cdt_insert_segment` in `dlls/d2d1/geometry.c` rief sich selbst endlos rekursiv auf.
+**Found it.** The function `d2d_cdt_insert_segment` in `dlls/d2d1/geometry.c` kept calling itself recursively without end.
 
-### Was ist CDT?
+### What is CDT?
 
-CDT = **Constrained Delaunay Triangulation** — ein geometrischer Algorithmus, der Vektorflächen in Dreiecke zerlegt, damit sie von der GPU gerendert werden können. Direct2D (d2d1) nutzt das zum Zeichnen von Vektor-Geometrien, die Plugin-GUIs wie Serum 2 oder Ozone 11 verwenden.
+CDT = **constrained Delaunay triangulation** - a geometric algorithm that splits vector shapes into triangles so the GPU can render them. Direct2D (d2d1) uses it to draw the vector geometry that plugin GUIs such as Serum 2 or Ozone 11 produce.
 
 ---
 
-## Phase 3: Den Bug im Quellcode finden
+## Phase 3: Finding the bug in the source
 
-### Wine-Quellcode herunterladen und analysieren
+### Downloading and reading the Wine source
 
 ```bash
 wget https://dl.winehq.org/wine/source/11.x/wine-11.9.tar.xz
 tar xf wine-11.9.tar.xz
 ```
 
-In `dlls/d2d1/geometry.c` die Funktion `d2d_cdt_insert_segment` gesucht:
+Looking for `d2d_cdt_insert_segment` in `dlls/d2d1/geometry.c`:
 
 ```bash
 grep -n "d2d_cdt_insert_segment" dlls/d2d1/geometry.c
 ```
 
-Die Funktion sah in etwa so aus (vereinfacht):
+The function looked roughly like this (simplified):
 
 ```c
 static BOOL d2d_cdt_insert_segment(struct d2d_cdt *cdt,
@@ -91,64 +93,70 @@ static BOOL d2d_cdt_insert_segment(struct d2d_cdt *cdt,
         struct d2d_cdt_edge_ref *edge,
         size_t end_vertex)
 {
-    // ... geometrische Berechnungen ...
+    // ... geometric calculations ...
 
-    // Problem 1: Wenn Eckpunkt auf einer Kante liegt
-    if (kollinear_bedingung) {
-        // rekursiver Aufruf mit neuem Startpunkt
+    // Problem 1: a vertex lies on an edge
+    if (collinear_condition) {
+        // recursive call with a new origin
         return d2d_cdt_insert_segment(cdt, geometry, &new_origin, edge, end_vertex);
-        //                             ^^^ UNBESCHRÄNKTE REKURSION
+        //                             ^^^ UNBOUNDED RECURSION
     }
 
-    // Problem 2: Beim Weiterlaufen der Triangulierung
-    if (weitere_bedingung) {
-        // noch ein rekursiver Aufruf
+    // Problem 2: while walking on through the triangulation
+    if (other_condition) {
+        // another recursive call
         return d2d_cdt_insert_segment(cdt, geometry, &new_origin, edge, end_vertex);
-        //                             ^^^ NOCHMAL REKURSION
+        //                             ^^^ RECURSION AGAIN
     }
 }
 ```
 
-**Warum tritt das bei Serum 2 auf?** Plugin-GUIs wie Serum 2 (JUCE-basiert) oder Ozone 11 rendern komplexe Vektorformen. Bei bestimmten Geometrien entstehen **kollineare oder duplizierte Eckpunkte** — das ist der Trigger für die Endlosrekursion.
+The only exit, the "Triangle not found" check, detects a full turn around the origin **of the current call**. Both recursive calls start with a new origin, so when the walk alternates between two origins (A → B → A → …), no call level ever completes a turn and the check never fires.
+
+**Why does this happen with Serum 2?** Plugin GUIs such as Serum 2 (JUCE-based) or Ozone 11 render complex vector shapes. Certain shapes contain **collinear or duplicate vertices** - and that triggers the endless recursion.
 
 ---
 
-## Phase 4: Den Fix entwickeln
+## Phase 4: Developing the fix
 
-### Ansatz: Rekursion → Iteration
+### Approach: recursion → iteration
 
-Die Lösung war konzeptionell einfach: Die Rekursion durch eine `goto`-basierte Iteration ersetzen und einen Sicherheitszähler hinzufügen, der nach einer angemessenen Anzahl von Iterationen abbricht.
+The fix was simple in concept: replace the recursion with a `goto`-based loop and add a safety counter that stops after a reasonable number of iterations.
 
 ```c
 static BOOL d2d_cdt_insert_segment(struct d2d_cdt *cdt, ...)
 {
-    unsigned int iterations = 0;  // NEU: Zähler
+    unsigned int iterations = 0;  // NEW: counter
 
-restart:                           // NEU: Sprungmarke statt Rekursion
-    // NEU: Sicherheitsguard — O(n) ist die theoretische Obergrenze
+restart:                           // NEW: jump label instead of recursion
+    // NEW: safety guard - O(n) is the theoretical upper bound
     if (++iterations > 16 * cdt->edge_count + 0x10000)
     {
         WARN("Iteration limit exceeded, skipping segment.\n");
-        return TRUE;  // Segment überspringen statt abstürzen
+        return TRUE;  // skip the segment instead of crashing
     }
 
-    // ... geometrische Berechnungen ...
+    // ... geometric calculations ...
 
-    if (kollinear_bedingung) {
+    if (collinear_condition) {
         origin = &new_origin;
-        goto restart;  // statt: return d2d_cdt_insert_segment(...)
+        goto restart;  // instead of: return d2d_cdt_insert_segment(...)
     }
 
-    if (weitere_bedingung) {
+    if (other_condition) {
         origin = &new_origin;
-        goto restart;  // statt: return d2d_cdt_insert_segment(...)
+        goto restart;  // instead of: return d2d_cdt_insert_segment(...)
     }
 }
 ```
 
-Das Limit `16 * edge_count + 0x10000` ist großzügig gewählt: Legitime Geometrien beenden den Algorithmus in O(n) Schritten, also weit unter diesem Limit. Nur pathologische Fälle (degenerierten Geometrien) erreichen das Limit — und die werden dann einfach übersprungen statt einen Stack-Overflow auszulösen.
+The limit `16 * edge_count + 0x10000` is deliberately generous: well-formed geometry finishes in O(n) steps, far below it. Only pathological (degenerate) cases reach the limit - and those are now skipped instead of overflowing the stack.
 
-### Kompilieren
+Both recursive calls are tail calls, so turning them into a loop changes nothing about what the function does. With the loop in place, the stack overflow turned into an endless spin at 100 % CPU at the same spot - proof that the function really never terminates, rather than just recursing very deeply.
+
+> The skip paths in this first version had a bug of their own (they didn't set `*edge`), which the fuzzer found later - see phase 8. The current patch is described in [patches/d2d1-geometry-fix.md](../patches/d2d1-geometry-fix.md).
+
+### Building
 
 ```bash
 cd wine-11.9
@@ -158,43 +166,45 @@ make -j$(nproc) dlls/d2d1/x86_64-windows/d2d1.dll
 
 ---
 
-## Phase 5: Die DLL ins Prefix bringen
+## Phase 5: Getting the DLL into the prefix
 
-### Problem: Wine lädt eigene DLLs bevorzugt
+### Problem: Wine prefers its own DLLs
 
-Wine hat ein internes Erkennungssystem: DLLs, die aus dem Wine-Quellbaum kompiliert wurden, tragen eine **Builtin-Signatur** bei Datei-Offset `0x40` (16 Bytes mit einem bestimmten Muster). Wenn diese Signatur vorhanden ist, lädt Wine die DLL als "builtin" — d.h. es ignoriert die Version im Prefix und nimmt die System-Version aus `/usr/lib/wine/`.
+Wine has a built-in detection mechanism: DLLs compiled from the Wine source tree carry a **builtin marker** at file offset `0x40` (the 16 bytes `Wine builtin DLL`). If the marker is present, Wine loads the DLL as "builtin" - that is, it ignores the copy in the prefix and uses the system version from `/usr/lib/wine/`.
 
-Das bedeutet: Einfach die neue DLL nach `system32/` kopieren reicht nicht. Wine würde sie trotzdem ignorieren.
+So simply copying the new DLL into `system32/` is not enough. Wine would ignore it.
 
-### Lösung: Signatur löschen
+### Fix: remove the marker
 
 ```python
-# Die 16 Bytes bei Offset 0x40 auf 0x00 setzen
+# Set the 16 bytes at offset 0x40 to 0x00
 with open("system32/d2d1.dll", "r+b") as f:
     f.seek(0x40)
     f.write(b"\x00" * 16)
 ```
 
-Damit denkt Wine: "Das ist keine Builtin-DLL" → lädt sie als "native" aus dem Prefix.
+Now Wine treats it as a non-builtin DLL and loads it as "native" from the prefix.
 
-### Registry-Eintrag setzen
+### Setting the registry entry
 
-Zusätzlich muss noch der DllOverride gesetzt werden:
+The DLL override has to be set as well:
 
 ```bash
 wine reg add "HKCU\Software\Wine\DllOverrides" /v d2d1 /d "native,builtin" /f
 ```
 
-`native,builtin` bedeutet: Erst die native (Prefix-)Version versuchen, falls nicht vorhanden auf builtin (System) zurückfallen.
+`native,builtin` means: try the native (prefix) version first and fall back to the builtin (system) version if it isn't there.
 
-### Verifizierung
+`scripts/04-apply-d2d1-patch.sh` does both steps today; the DLL in `assets/` already has the marker zeroed.
+
+### Checking
 
 ```bash
-# MD5 der gepatchten DLL
+# MD5 of the patched DLL (the 11.9 build at the time)
 md5sum system32/d2d1.dll
 # → 83d47ffb76f5d7248474b6aaa546b46b
 
-# Signatur-Check: muss 16x 0x00 sein
+# Marker check: must be 16 × 0x00
 python3 -c "
 f = open('system32/d2d1.dll','rb')
 f.seek(0x40)
@@ -205,46 +215,44 @@ print(f.read(16).hex())
 
 ---
 
-## Phase 6: Test und Bestätigung
+## Phase 6: Testing and confirmation
 
-Nach dem Patch:
+After the patch:
 
-1. FL Studio gestartet mit `start-flstudio.sh`
-2. Serum 2 geladen
-3. Mehrere Presets durchgeschalten
-4. Zweite Serum 2 Instanz geladen
-5. Wieder Presets geschalten
+1. Started FL Studio with the launcher
+2. Loaded Serum 2
+3. Stepped through several presets
+4. Loaded a second Serum 2 instance
+5. Stepped through presets again
 
-**Ergebnis:** Kein Freeze. Der schlimmste Fall ist jetzt, dass nach sehr vielen Preset-Wechseln Serum's **eigene** GUI langsam wird — aber FL Studio bleibt stabil und läuft weiter. Das ist normales Verhalten (Serum 2's JUCE-GUI hat ein eigenes WM_PAINT-Flut-Problem) und kein kritischer Fehler mehr.
-
-Reaktion bei erstem Test: *„Krass!!! das funktioniert..."*
+**Result:** no freeze. The worst case now is that after very many preset changes Serum's **own** GUI becomes sluggish - but FL Studio stays stable and keeps running. That is a separate issue (Serum 2's JUCE GUI repaints very heavily) and no longer critical.
 
 ---
 
-## Bonus: Splice-Debugging
+## Side quest: debugging Splice
 
 ### Problem
 
-Splice (Electron-App für Plugin-Verwaltung und Sample-Downloads) öffnete scheinbar nicht. Der Prozess startete, aber die GUI erschien nicht.
+Splice (an Electron app for plugin management and sample downloads) seemed not to open. The process started, but no window appeared.
 
-### Diagnose
+### Diagnosis
 
 ```bash
 WINEDEBUG=fixme-all wine Splice.exe 2>/dev/null
 tail -f SpliceSettings/logs/log-ui.log
 ```
 
-Log-Analyse ergab:
+The log showed:
 
-1. **`"UI not ready, enqueueing message..."`** — Der Electron-Renderer signalisierte nie "ready"
-2. **`"The current refresh token is invalid"`** — Auth-Token abgelaufen
-3. **`"Failed to delete the database: Database IO error"`** — Service Worker Cache korrumpiert
-4. **`upgradeState: "Conveyor Migration"`** — Splice versuchte sich automatisch auf ein neues System zu migrieren, was unter Wine hängt
+1. **`"UI not ready, enqueueing message..."`** - the Electron renderer never signalled "ready"
+2. **`"The current refresh token is invalid"`** - the login token had expired
+3. **`"Failed to delete the database: Database IO error"`** - the service worker cache was corrupted
+4. **`upgradeState: "Conveyor Migration"`** - Splice tried to migrate itself to a new update system automatically, which hangs under Wine
 
-### Lösungen
+### Fixes at the time
 
 ```bash
-# 1. Conveyor-Migration deaktivieren
+# 1. Disable the Conveyor migration
 python3 -c "
 import json
 with open('appState.json') as f: s = json.load(f)
@@ -252,85 +260,83 @@ s['upgradeState'] = None
 with open('appState.json','w') as f: json.dump(s, f)
 "
 
-# 2. Korrumpierten Cache löschen
+# 2. Delete the corrupted cache
 rm -rf "Service Worker/" "Code Cache/" "Session Storage/" "blob_storage/"
 
-# 3. Lockfile entfernen (verhindert Neustart)
+# 3. Remove the lock file (it prevents a restart)
 rm -f lockfile
 ```
 
-Nach diesen Fixes: Splice öffnet sich, zeigt eine Login-Seite, und Plugins können aktiviert werden.
+After these fixes, Splice opened, showed a login page, and plugins could be activated. The current Splice launcher disables the Conveyor migration permanently in `app.asar` and offers `--repair` for the cache steps.
 
-### Wichtige Erkenntnis
+### Key insight
 
-`"UI not ready"` im Log bedeutet **nicht** "Fenster ist leer". Es bedeutet nur, dass der Electron-Hauptprozess noch auf ein IPC-Signal vom Renderer wartet. Das Fenster zeigt trotzdem Inhalt (Login-Seite, Loading-Screen). Der Fehler war, dass unsere Test-Sessions das Fenster mit Timeouts immer wieder abwürgten bevor der Nutzer reagieren konnte.
-
----
+`"UI not ready"` in the log does **not** mean "the window is empty". It only means the Electron main process is still waiting for an IPC signal from the renderer. The window still shows content (login page, loading screen). The real problem was that our test runs kept killing the window with timeouts before anyone could interact with it.
 
 ---
 
-## Bonus 2: WineASIO – alle Eingänge des Audio-Interfaces in FL Studio
+## Side quest 2: WineASIO – all inputs of the audio interface in FL Studio
 
 ### Problem
 
-FL Studio unter Wine zeigte beim Behringer UMC404HD (4 Eingänge) immer nur **2 Eingänge** — egal welcher ASIO-Treiber gewählt wurde.
+With a Behringer UMC404HD (4 inputs), FL Studio under Wine always showed only **2 inputs** - no matter which ASIO driver was selected.
 
-### Ursache: Wine WASAPI ist auf Stereo begrenzt
+### Cause: Wine's WASAPI is limited to stereo
 
-Wine's eingebaute ASIO-Emulation ("FL Studio ASIO") nutzt intern WASAPI. Wine's WASAPI-Implementation gibt immer nur das Standard-Stereo-Paar zurück — das ist eine bekannte Einschränkung, keine Konfigurationssache.
+FL Studio's own ASIO driver ("FL Studio ASIO") uses WASAPI internally. Wine's WASAPI implementation only ever returns the default stereo pair - a known limitation, not a configuration issue.
 
-### Lösung: WineASIO + PipeWire-JACK
+### Fix: WineASIO + PipeWire JACK
 
-WineASIO (`pacman -S wineasio`) ist ein Wine-Treiber, der direkt an JACK (hier: PipeWire's JACK-Kompatibilitätsschicht) andockt. Damit werden alle Hardware-Kanäle sichtbar.
+WineASIO (`pacman -S wineasio`) is a Wine driver that connects directly to JACK (here: PipeWire's JACK compatibility layer). That makes every hardware channel visible.
 
-### Debugging-Verlauf
+### How the debugging went
 
-**Schritt 1 — Registrierung fehlgeschlagen (lautlos)**
+**Step 1 - registration failed (silently)**
 
 ```bash
 WINEPREFIX=... wine regsvr32 /s wineasio64.dll
-# Exit: 3 → Fehler, aber keine Fehlermeldung
+# exit code 3 → failure, but no error message
 ```
 
-Die DLL `wineasio64.dll` konnte nicht als COM-Objekt registriert werden. Grund noch unklar.
+The DLL `wineasio64.dll` could not be registered as a COM object, for no obvious reason.
 
-**Schritt 2 — DLL-Ladevorgang mit Debug-Output verfolgt**
+**Step 2 - tracing the DLL load with debug output**
 
 ```bash
 WINEDEBUG=+loaddll,+module wine regsvr32 /s wineasio64.dll 2>&1 | grep wineasio
 ```
 
-Ausgabe:
+Output:
 ```
 looking for "wineasio.dll" for file "wineasio64.dll"
 cannot find builtin library for wineasio64.dll
 Failed to load module "wineasio64.dll"; status=c0000135
 ```
 
-**Root Cause gefunden:** Der Wine-Stub `wineasio64.dll` (2 KB PE-Platzhalter) hat in seiner PE-Export-Tabelle intern den Namen `wineasio.dll` eingebaut. Wine liest diesen Namen und sucht deshalb nach `wineasio.dll.so` als Builtin-Library — diese existiert im `wineasio`-Paket aber nicht. Nur `wineasio64.dll.so` ist vorhanden. Das ist ein **Packaging-Bug** im wineasio-Paket.
+**Root cause:** the Wine stub `wineasio64.dll` (a 2 KB PE placeholder) has the name `wineasio.dll` built into its PE export table. Wine reads that name and therefore looks for `wineasio.dll.so` as the builtin library - but the `wineasio` package doesn't ship that file, only `wineasio64.dll.so`. That is a **packaging bug** in the wineasio package.
 
-**Schritt 3 — Fix: Symlink erstellen**
+**Step 3 - fix: create a symlink**
 
 ```bash
 sudo ln -s /usr/lib/wine/x86_64-unix/wineasio64.dll.so \
            /usr/lib/wine/x86_64-unix/wineasio.dll.so
 ```
 
-Danach lädt `wineasio64.dll` korrekt als Builtin:
+After that, `wineasio64.dll` loads correctly as builtin:
 ```
 Loaded "C:\windows\system32\wineasio64.dll" at 0x...: builtin  ✓
 ```
 
-**Schritt 4 — Sample-Rate-Konflikt**
+**Step 4 - sample rate conflict**
 
-Nach erfolgreichem Laden kam die nächste Fehlermeldung:
+Once it loaded, the next error appeared:
 ```
 Warning: The needed sample rate (44100 Hz) couldn't be set or is not supported by the ASIO driver.
 ```
 
-PipeWire lief auf 48000 Hz (Standard). WineASIO meldet FL Studio die JACK-Sample-Rate — Mismatch.
+PipeWire was running at 48000 Hz (its default). WineASIO reports the JACK sample rate to FL Studio - mismatch.
 
-Fix: PipeWire User-Config anlegen:
+The fix at the time was a PipeWire user config:
 
 ```bash
 mkdir -p ~/.config/pipewire/pipewire.conf.d/
@@ -346,9 +352,11 @@ EOF
 systemctl --user restart pipewire pipewire-pulse wireplumber
 ```
 
-**Schritt 5 — Launcher anpassen**
+> This config later turned out to cause wrong playback speed (a quantum of 1024 against a WineASIO buffer of 256). The launcher now pins rate and quantum at runtime instead - see [audio.md](audio.md).
 
-FL Studio muss über `pw-jack` gestartet werden, damit der Wine-Prozess im PipeWire-JACK-Kontext läuft:
+**Step 5 - adjusting the launcher**
+
+FL Studio has to be started through `pw-jack` so that the Wine process runs in PipeWire's JACK context:
 
 ```bash
 export PIPEWIRE_RUNTIME_DIR=/run/user/$(id -u)
@@ -356,60 +364,61 @@ export JACK_NO_AUDIO_RESERVATION=1
 exec pw-jack wine "FL64.exe"
 ```
 
-### Ergebnis
+### Result
 
-Nach allen Fixes: WineASIO wird in FL Studio unter `Options → Audio Settings → ASIO` angezeigt, alle 4 Eingänge des UMC404HD sind sichtbar und verwendbar.
+After all fixes, WineASIO shows up in FL Studio under `Options → Audio Settings → ASIO`, and all 4 inputs of the UMC404HD are visible and usable.
 
-**Wichtig:** Das grüne **Input-Monitoring-Symbol** im FL Studio Mixer deaktivieren, um Rückkopplungen zu vermeiden. Das ist kein Wine-Bug — identisches Verhalten wie auf Windows.
+**Important:** turn off the green **input monitoring** button in FL Studio's mixer to avoid feedback. This is not a Wine bug - it behaves the same on Windows.
 
 ---
 
-## Phase 7: GL-Deadlock unter NVIDIA (August 2026)
+## Phase 7: GL deadlock with NVIDIA (August 2026)
 
-Ein zweiter Freeze-Typ: UI steht, Audio läuft, der Main-Thread verbraucht **keine** CPU. Die Auswertung von `/proc/<pid>/task/*/syscall` und der Futex-Adressen als `pthread_mutex_t` zeigte einen Lock-Zyklus: Ein `SmoothAnimation`-Thread hält den rekursiven GL-Mutex des NVIDIA-Treibers und wartet auf eine X-Antwort, die nur der Main-Thread abholen kann – der wiederum auf den GL-Mutex wartet. Ursache ist, dass winex11 alle GLX-Aufrufe über eine einzige, von allen Threads geteilte Xlib-Verbindung führt ([Bug 60113](https://bugs.winehq.org/show_bug.cgi?id=60113)).
+A second kind of freeze: the UI stops, audio keeps playing, and the main thread uses **no** CPU. Reading `/proc/<pid>/task/*/syscall` and interpreting the futex addresses as `pthread_mutex_t` revealed a lock cycle: a `SmoothAnimation` thread holds the NVIDIA driver's recursive GL mutex and waits for an X reply that only the main thread can pick up - and the main thread is waiting for the GL mutex. The underlying cause is that winex11 routes all GLX calls through a single Xlib connection shared by every thread ([bug 60113](https://bugs.winehq.org/show_bug.cgi?id=60113)).
 
-Im Prefix stand noch `UseEGL=N` aus einem früheren Test. Mit EGL (Wine-Default) trat in sechs Wochen Alltagsbetrieb kein Deadlock mehr auf; vorher griff ein Watchdog bis zu 27-mal pro Tag ein.
+The prefix still had `UseEGL=N` from an earlier test. With EGL (Wine's default), six weeks of daily use passed without a single deadlock; before that, a watchdog had to step in up to 27 times a day.
 
-## Phase 8: Fuzzing der d2d1-Triangulierung (Oktober 2026)
+## Phase 8: Fuzzing the d2d1 triangulation (October 2026)
 
-Die gepatchte DLL stammte noch aus Wine 11.9. Ein Rebuild auf 11.19 brachte upstreams Fix für ein Speicherleck mit. Um die Robustheit zu prüfen, entstand ein Fuzzer (`tools/d2d1_fuzz.cpp`), der zufällige Pfade auf einem 6×6-Raster erzeugt – maximal viele Duplikate und Kollinearitäten. Er fand innerhalb von Sekunden vier weitere Fehlerstellen, darunter eine, die der eigene Patch eingeführt hatte: Beim Überspringen eines Segments blieb der Rückgabe-Edge unverändert, der Aufrufer arbeitete mit einem freigegebenen Edge weiter. Das passt zu drei verschluckten Access-Violations direkt nach Direct2D-Aufrufen in einem älteren Log.
+The patched DLL was still based on Wine 11.9. Rebuilding it on 11.19 brought in upstream's fix for a memory leak. To check its robustness, a fuzzer was written (`tools/d2d1_fuzz.cpp`) that generates random paths on a 6×6 grid - as many duplicates and collinear points as possible. Within seconds it found four more defects, including one that our own patch had introduced: when skipping a segment, the returned edge was left unchanged, and the caller carried on with an edge that had already been freed. That matches three swallowed access violations right after Direct2D calls in an older log.
 
-Alle Hänger wurden mit `gdb` (nur `$pc`) und `addr2line` gegen die DLL mit Debug-Informationen lokalisiert, Stack-Overflows durch Zählen der Rücksprungadressen auf dem Stack. Nach den Fixes liefen 240 000 Fuzz-Fälle ohne Fehler, Wines Testsuite blieb unverändert.
+Every hang was located with `gdb` (only `$pc`) and `addr2line` against the DLL with debug information; stack overflows by counting the return addresses on the stack. After the fixes, 240,000 fuzz cases ran without a failure and Wine's test suite was unchanged.
 
-## Phase 9: Abstürze und Leistung einzelner Plugins (Oktober 2026)
+## Phase 9: Crashes and performance of individual plugins (October 2026)
 
-**nih-plug:** Ein Live-Absturz zeigte `Could not create OpenGL context: CreationFailed` in baseview. Ein nachgebautes WGL-Testprogramm belegte, dass NVIDIA-EGL Formate mit 8 Bit Alpha nur mit 32-Bit-Visual anbietet und Wine diese für Fenster sperrt. Ein minimaler CLAP-Host (`tools/clap_guitest.c`) reproduzierte den Absturz außerhalb von FL; mit dem Alpha-Fallback in baseview öffnen und rendern alle betroffenen Editoren.
+**nih-plug:** a live crash showed `Could not create OpenGL context: CreationFailed` in baseview. A small WGL test program showed that NVIDIA's EGL only offers formats with 8-bit alpha together with a 32-bit visual, and that Wine blocks those for windows. A minimal CLAP host (`tools/clap_guitest.c`) reproduced the crash outside FL; with the alpha fallback in baseview, every affected editor opens and renders.
 
-**Serum 2:** Während Serum 2 zeichnete, schrieb Wine 11 000 `fixme:d2d`-Zeilen pro Sekunde, und FLs Main-Thread lag bei 64–82 % statt 24 % – allerdings lud zur selben Zeit ein großes Projekt, der Anteil von Serum ist daraus nicht sauber bestimmbar. Der JUCE-Quellcode zeigt, dass `strokePath()` pro Aufruf eine neue Hollow-Geometrie erzeugt. Ein Benchmark ergab 3,3 ms pro `Close()` – fast vollständig in der Selbstüberschneidungs-Prüfung, die nur für Füllflächen nötig ist. Das Überspringen von Hollow-Figuren senkte die Zeit pro Pfad um den Faktor 11.
+**Serum 2:** while Serum 2 was drawing, Wine wrote 11,000 `fixme:d2d` lines per second, and FL's main thread was at 64–82 % instead of 24 % - but a large project was loading at the same time, so Serum's share can't be determined cleanly from that. JUCE's source shows that `strokePath()` creates a new hollow geometry on every call. A benchmark measured 3.3 ms per `Close()` - almost all of it in the self-intersection pass, which is only needed for filled areas. Skipping hollow figures cut the time per path by a factor of 11. A targeted measurement inside FL later showed no measurable difference, though (see [verification.md](verification.md)).
 
-## Zusammenfassung
+## Summary
 
-| Schicht | Problem | Fix |
+| Layer | Problem | Fix |
 |---------|---------|-----|
-| Wine d2d1 | Stack-Overflow in CDT-Triangulierung | Rekursion → Iteration mit Guard |
-| Wine DLL-Loading | Builtin-Signatur verhindert Prefix-DLL | 16 Bytes bei 0x40 nullen |
-| Splice | Conveyor-Migration hängt unter Wine | `upgradeState = null` in appState.json |
-| Splice | Service Worker Cache korrumpiert | Cache-Verzeichnisse löschen |
-| Splice | Auth-Token abgelaufen | Einmalig neu einloggen |
-| WineASIO | wineasio64.dll lädt nicht (Packaging-Bug) | Symlink wineasio.dll.so → wineasio64.dll.so |
-| WineASIO | Sample-Rate-Mismatch (48000 vs 44100 Hz) | PipeWire User-Config auf 44100 Hz |
-| WineASIO | Nur 2 Inputs sichtbar (WASAPI-Limit) | WineASIO + pw-jack statt FL Studio ASIO |
+| Wine d2d1 | Stack overflow in the CDT triangulation | Recursion → iteration with a guard (plus four more fixes, see phase 8) |
+| Wine DLL loading | Builtin marker stops the prefix DLL from loading | Zero the 16 bytes at 0x40 |
+| Wine winex11 + NVIDIA | GL deadlock between the main thread and an animation thread | `UseEGL=Y` |
+| Splice | Conveyor migration hangs under Wine | Disabled in the launcher |
+| Splice | Corrupted service worker cache | Delete the cache directories (`--repair`) |
+| Splice | Expired login token | Log in again once |
+| WineASIO | wineasio64.dll doesn't load (packaging bug) | Symlink wineasio.dll.so → wineasio64.dll.so |
+| WineASIO | Sample rate mismatch (48000 vs. 44100 Hz) | Launcher pins rate and quantum at runtime |
+| WineASIO | Only 2 inputs visible (WASAPI limit) | WineASIO + pw-jack instead of FL Studio ASIO |
 
-### Was wir gelernt haben
+### What we learned
 
-- **`R`-Status (running) statt `S`-Status (sleep)** bei eingefrorenen Wine-Prozessen deutet auf Endlosschleife/Rekursion hin, nicht auf Deadlock
-- **GDB-Backtrace auf laufenden Prozess** ist das mächtigste erste Tool bei Wine-Freezes
-- **Wine lädt Prefix-DLLs nicht automatisch** wenn die Builtin-Signatur vorhanden ist — die muss aktiv entfernt werden
-- **Electron-Apps unter Wine** haben oft GPU-Initialisierungsprobleme, aber das ist meistens nicht das eigentliche Problem — Caches und Auth-State sind häufiger schuld
-- **Audio läuft weiter beim Freeze** = Main-Thread hängt, Audio-Threads laufen → präzisiert die Suche enorm
-- **Wine DLL-Stubs** haben einen internen PE-Namen der von dem Dateinamen abweichen kann — `WINEDEBUG=+module` deckt solche Ladefehler auf, die sonst lautlos scheitern
-- **WASAPI unter Wine** ist auf Stereo begrenzt — für Multi-Channel-Interfaces WineASIO + JACK/PipeWire verwenden
+- **State `R` (running) instead of `S` (sleeping)** in a frozen Wine process points to an infinite loop or recursion, not a deadlock
+- **A GDB backtrace of the live process** is the most powerful first tool for Wine freezes
+- **Wine doesn't load prefix DLLs on its own** while the builtin marker is present - it has to be removed
+- **Electron apps under Wine** often have GPU initialisation problems, but that is usually not the real issue - caches and login state are more often to blame
+- **Audio keeps playing during the freeze** = the main thread is stuck while the audio threads run → narrows the search enormously
+- **Wine DLL stubs** can carry an internal PE name that differs from the file name - `WINEDEBUG=+module` reveals load errors that otherwise fail silently
+- **WASAPI under Wine** is limited to stereo - use WineASIO + JACK/PipeWire for multi-channel interfaces
 
 ---
 
-## Weiterführendes
+## Further reading
 
-- [Wine Bug Tracker](https://bugs.winehq.org/) — für ähnliche d2d1-Probleme
-- [Wine Staging Patches](https://github.com/wine-staging/wine-staging) — manchmal sind solche Fixes hier früher verfügbar
-- [DXVK GitHub](https://github.com/doitsujin/dxvk) — DirectX → Vulkan Übersetzungsschicht
-- [ProtonDB](https://www.protondb.com/) — Community-Reports zu Wine/Proton-Kompatibilität
+- [Wine bug tracker](https://bugs.winehq.org/) - for similar d2d1 problems
+- [Wine Staging](https://gitlab.winehq.org/wine/wine-staging) - fixes sometimes land here first
+- [DXVK on GitHub](https://github.com/doitsujin/dxvk) - DirectX → Vulkan translation layer
+- [ProtonDB](https://www.protondb.com/) - community reports on Wine/Proton compatibility

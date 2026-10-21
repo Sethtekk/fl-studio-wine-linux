@@ -93,14 +93,12 @@ Remove everything again: `./uninstall.sh` (keeps your prefix with FL and plugins
 |---|---|
 | [Installation per distribution](docs/installation.md) | What the installer does on your system, manual steps |
 | [Troubleshooting](docs/troubleshooting.md) | Freezes, crashes, error 1411, Splice, audio |
-| [Audio](docs/audio.md) 🇩🇪 | WineASIO, PipeWire quantum, routing |
-| [Plugins](docs/plugins.md) 🇩🇪 | Tested plugins, nih-plug rebuild, test tools |
-| [Updates](docs/updating.md) 🇩🇪 | Wine updates, pool-fix automation |
-| [Verification](docs/verification.md) 🇩🇪 | What was tested how – and what's still open |
-| [Debugging journal](docs/debugging-journey.md) 🇩🇪 | How the causes were found |
-| [d2d1 patch](patches/d2d1-geometry-fix.md) · [pool patch](patches/wineserver-pool-size.md) 🇩🇪 | Technical details of the Wine patches |
-
-🇩🇪 = currently German only. Translations welcome.
+| [Audio](docs/audio.md) | WineASIO, PipeWire quantum, routing |
+| [Plugins](docs/plugins.md) | Tested plugins, nih-plug rebuild, test tools |
+| [Updates](docs/updating.md) | Wine updates, pool-fix automation |
+| [Verification](docs/verification.md) | What was tested how – and what's still open |
+| [Debugging journal](docs/debugging-journey.md) | How the causes were found |
+| [d2d1 patch](patches/d2d1-geometry-fix.md) · [pool patch](patches/wineserver-pool-size.md) | Technical details of the Wine patches |
 
 ## Upstream reports
 

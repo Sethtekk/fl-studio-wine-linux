@@ -1,6 +1,6 @@
-// Minimaler VST2-Host: laedt ein Plugin, oeffnet den Editor in einem Win32-Fenster
-// und ruft effEditIdle wie ein Host. Misst die Zeit pro Idle-Runde (UI-Last).
-// Aufruf: vst2_guitest.exe <plugin.dll> <sekunden>
+// Minimal VST2 host: loads a plugin, opens its editor in a Win32 window and
+// calls effEditIdle like a host would. Measures the time per idle round (UI load).
+// Usage: vst2_guitest.exe <plugin.dll> <seconds>
 #include <windows.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -40,11 +40,11 @@ int main(int argc, char **argv)
 {
     int secs = argc > 2 ? atoi(argv[2]) : 10;
     HMODULE lib = LoadLibraryA(argv[1]);
-    if (!lib) { printf("LoadLibrary fehlgeschlagen %lu\n", GetLastError()); return 1; }
+    if (!lib) { printf("LoadLibrary failed %lu\n", GetLastError()); return 1; }
     AEffect *(*entry)(audioMasterCallback) = (void *)GetProcAddress(lib, "VSTPluginMain");
     if (!entry) entry = (void *)GetProcAddress(lib, "main");
     AEffect *e = entry ? entry(host_cb) : NULL;
-    if (!e || e->magic != 0x56737450) { printf("kein VST2-Plugin\n"); return 1; }
+    if (!e || e->magic != 0x56737450) { printf("not a VST2 plugin\n"); return 1; }
     e->dispatcher(e, effOpen, 0, 0, 0, 0);
     e->dispatcher(e, effSetSampleRate, 0, 0, 0, 44100.f);
     e->dispatcher(e, effSetBlockSize, 0, 512, 0, 0);
@@ -55,7 +55,7 @@ int main(int argc, char **argv)
     HWND hwnd = CreateWindowA("STATIC", argv[1], WS_OVERLAPPEDWINDOW | WS_VISIBLE, 60, 60,
                               wr.right - wr.left, wr.bottom - wr.top, 0, 0, 0, 0);
     e->dispatcher(e, effEditOpen, 0, 0, hwnd, 0);
-    printf("Editor offen (%dx%d)\n", w, h); fflush(stdout);
+    printf("Editor open (%dx%d)\n", w, h); fflush(stdout);
 
     DWORD t0 = GetTickCount(); MSG m; int rounds = 0; double worst = 0;
     LARGE_INTEGER f, a, b; QueryPerformanceFrequency(&f);
@@ -67,10 +67,10 @@ int main(int argc, char **argv)
         double ms = (b.QuadPart - a.QuadPart) * 1000.0 / f.QuadPart; if (ms > worst) worst = ms;
         rounds++; Sleep(15);
     }
-    printf("%d Idle-Runden, langsamste %.1f ms\n", rounds, worst);
+    printf("%d idle rounds, slowest %.1f ms\n", rounds, worst);
     e->dispatcher(e, effEditClose, 0, 0, 0, 0);
     e->dispatcher(e, effMainsChanged, 0, 0, 0, 0);
     e->dispatcher(e, effClose, 0, 0, 0, 0);
-    printf("OK sauber beendet\n");
+    printf("OK, exited cleanly\n");
     return 0;
 }

@@ -1,4 +1,4 @@
-// JUCE-artige Last: pro Frame neue Pfade (Wellenform/Huellkurve) bauen und nur umranden
+// JUCE-style load: build new paths every frame (waveform/envelope) and only stroke them
 #include <windows.h>
 #include <d2d1.h>
 #include <wincodec.h>
@@ -24,5 +24,5 @@ int main(int argc,char**argv){
     if(i==0)rt->BeginDraw(); rt->DrawGeometry(g,br,1.5f,ss); if(i==N-1)rt->EndDraw(); double d=now();
     g->Release(); tb+=b-a; tc+=c-b; td+=d-c;
   }
-  printf("segs=%d bez=%d: Aufbau %.3f ms, Close %.3f ms, Draw %.3f ms pro Pfad\n",segs,bez,tb/N,tc/N,td/N);
+  printf("segs=%d bez=%d: build %.3f ms, Close %.3f ms, Draw %.3f ms per path\n",segs,bez,tb/N,tc/N,td/N);
 }

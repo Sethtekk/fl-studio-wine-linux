@@ -1,20 +1,20 @@
-# wineserver Shared-Session-Pool Fix – Technische Dokumentation
+# wineserver shared session pool fix – technical notes
 
 ## Problem
 
-**Datei:** `server/mapping.c`
-**Funktion:** `create_session_mapping()` (Zeile ~1428)
-**Wine-Version:** 11.9 (und neuere)
+**File:** `server/mapping.c`
+**Function:** `create_session_mapping()` (around line 1428)
+**Wine version:** 11.9 and later
 
-Wine legt für jede Session einen gemeinsam genutzten Speicherbereich („shared session") an, in dem **Fenster, Fensterklassen und Message-Queues** als Objekte abgelegt werden. Die *initiale* Größe ist auf **512 Objekte** dimensioniert.
+For every session, Wine creates a shared memory area (the "shared session") that holds **windows, window classes and message queues** as objects. Its *initial* size is set to **512 objects**.
 
-FL Studio registriert beim Laden eines Projekts für jeden Mixer-Track, jedes Stock-Plugin und jede Plugin-GUI eigene Fensterklassen. Bei großen Projekten (viele Tracks + Sidechain-Routing + viele Plugins) ist der Pool mit 512 Objekten erschöpft, bevor alles geladen ist.
+When FL Studio loads a project, it registers its own window classes for every mixer track, every stock plugin and every plugin GUI. In large projects (many tracks + sidechain routing + many plugins) the 512-object pool runs out before everything has loaded.
 
-**Symptom:** FL Studio bricht mit **`System Error. Code: 1411. Klasse existiert nicht`** ab (oder hängt sich beim Projektwechsel auf). Stock-Plugins lassen sich nicht mehr öffnen.
+**Symptom:** FL Studio aborts with **`System Error. Code: 1411. Class does not exist`**, or hangs when switching projects. Stock plugins can no longer be opened.
 
-## Ursache (per Log bewiesen)
+## Cause (confirmed in the log)
 
-Mit `WINEDEBUG=+seh,err+win` zeigt das Log im Crash-Moment:
+With `WINEDEBUG=+seh,err+win`, the log at the moment of the crash shows:
 
 ```
 err:class:NtUserRegisterClassExWOW Failed to get shared session object for window class
@@ -22,7 +22,7 @@ err:class:NtUserRegisterClassExWOW Failed to get shared session object for windo
 thread caused non-unwinding panic. aborting.   (c0000409 = STATUS_STACK_BUFFER_OVERRUN)
 ```
 
-`NtUserRegisterClassExWOW` bekommt keinen freien Slot mehr aus dem Shared-Session-Pool → Klassenregistrierung schlägt fehl → FL meldet 1411. Der serverseitige Pool wächst zwar (`grow_session_mapping`), aber zuverlässig stabil ist es, den **initialen** Pool von vornherein groß genug zu wählen.
+`NtUserRegisterClassExWOW` gets no free slot from the shared session pool → class registration fails → FL reports 1411. The server can grow the pool (`grow_session_mapping`), but the reliable way to keep it stable is to make the **initial** pool large enough from the start.
 
 ## Fix
 
@@ -32,101 +32,91 @@ thread caused non-unwinding panic. aborting.   (c0000409 = STATUS_STACK_BUFFER_O
 +    size_t size = max( sizeof(*shared_session) + sizeof(object_shm_t) * 32768, 0x10000 );
 ```
 
-Pool von **512 → 32768** Objekten. Damit reicht der initial gemappte Bereich auch für sehr große FL-Projekte. Der Patch liegt als `patches/wineserver-pool-size.patch` bei.
+Pool size **512 → 32768** objects. With that, the initially mapped area is enough even for very large FL projects. The patch is included as `patches/wineserver-pool-size.patch`.
 
-## Anwenden / Neu bauen
+## Applying / rebuilding
 
-### Variante A – Vanilla Wine (z. B. exakt 11.9)
+The simplest way is the build script, which does all of the steps below for one wine-staging version:
 
 ```bash
-# Wine-Quellcode zur passenden Version holen
+bash scripts/build-wineserver-poolfix.sh          # installed version
+bash scripts/build-wineserver-poolfix.sh 11.20    # any version
+```
+
+### Option A – vanilla Wine (e.g. exactly 11.9)
+
+```bash
+# Get the Wine source for the matching version
 wget https://dl.winehq.org/wine/source/11.x/wine-11.9.tar.xz
 tar xf wine-11.9.tar.xz && cd wine-11.9
 
-# Patch anwenden
-patch -p1 < /pfad/zu/patches/wineserver-pool-size.patch
+# Apply the patch
+patch -p1 < /path/to/patches/wineserver-pool-size.patch
 
-# Nur den wineserver bauen
+# Build only the wineserver
 ./configure --enable-archs=i386,x86_64
 make -j$(nproc) server/wineserver
 
-# Ergebnis liegt in server/wineserver
+# The result is server/wineserver
 ```
 
-### Variante B – wine-staging (PFLICHT für 11.10, Protokoll 943)
+### Option B – wine-staging (REQUIRED from 11.10 on)
 
-Da auf CachyOS **wine-staging** installiert ist, muss der wineserver ab 11.10 aus den
-Staging-Quellen gebaut werden (sonst Protokoll-Mismatch). Erst Staging-Patches anwenden,
-**dann** den Pool-Patch:
+If **wine-staging** is installed (as on CachyOS), the wineserver must be built from the staging sources from 11.10 on, otherwise the server protocol won't match. Apply the staging patches first, **then** the pool patch:
 
 ```bash
-# Vanilla-Tarball + passende wine-staging-Quellen (gleiche Version!)
+# Vanilla tarball + matching wine-staging sources (same version!)
 wget https://dl.winehq.org/wine/source/11.x/wine-11.10.tar.xz
 tar xf wine-11.10.tar.xz
 git clone --branch v11.10 --depth 1 https://gitlab.winehq.org/wine/wine-staging.git wine-staging-src
 
-# 1) Staging-Patches in den Wine-Baum spielen (bringt Protokoll auf 943)
-python3 wine-staging-src/staging/patchinstall.py --all --source-dir wine-11.10
+# 1) Apply the staging patches to the Wine tree (brings the protocol to 943)
+python3 wine-staging-src/staging/patchinstall.py --all --destdir wine-11.10
 
-# 2) DANACH den Pool-Patch anwenden
+# 2) THEN apply the pool patch
 cd wine-11.10
-patch -p1 < /pfad/zu/patches/wineserver-pool-size.patch
+patch -p1 < /path/to/patches/wineserver-pool-size.patch
 
-# 3) Out-of-tree nur den wineserver bauen
+# 3) Build only the wineserver, out of tree
 cd .. && mkdir build-11.10 && cd build-11.10
 ../wine-11.10/configure --prefix=/usr --enable-win64 --with-vulkan
 make -j$(nproc) server/wineserver
-strip server/wineserver        # ~5,1M -> ~767k
-
-# Verifizieren, dass Protokoll 943 drinsteht:
-strings server/wineserver | grep -i "protocol" | head
+strip server/wineserver        # ~5.1 MB -> ~770 KB
 ```
 
-## Die vorkompilierten Binaries
+## The prebuilt binaries
 
-> ⚠️ **Pro Wine-Version ein eigenes Binary!** Der wineserver muss exakt zur installierten
-> Wine-Version passen, sonst: `wine client error:0: version mismatch`. Ein altes Binary
-> drüberkopieren funktioniert NICHT.
+> ⚠️ **One binary per Wine version!** The wineserver must match the installed Wine
+> version exactly, otherwise you get `wine client error:0: version mismatch`. Copying
+> an older binary over it does NOT work.
 
-| Datei | Wine-Version | MD5 | Server-Protokoll |
-|---|---|---|---|
-| `assets/wineserver-poolfix` | Wine **Staging 11.9**-1.1, x86_64 | `da13506f620709fb5dab7d11186c6a93` | 942 |
-| `assets/wineserver-poolfix-11.10-staging` | Wine **Staging 11.10**-1.1, x86_64 | `2cd976da97a88f0d4f9cba592fe18d3f` | 943 |
+`assets/` contains stripped pool-fix binaries for **wine-staging 11.9 to 11.20** (x86_64, pool = 32768). Their MD5 hashes are listed in [`assets/poolfix-md5.txt`](../assets/poolfix-md5.txt); every installation checks against that manifest.
 
-Beide ~756 KB, gestrippt, Pool=32768.
+### ⚠️ Protocol trap in 11.10
 
-### ⚠️ Protokoll-Falle bei 11.10 (wichtig!)
+Wine **staging** 11.10 uses server protocol **943**, *vanilla* Wine 11.10 only **942**.
+A 11.10 wineserver built from the **vanilla** sources fails against the installed staging
+libraries with `wine client error:0: version mismatch 942/943`, and FL won't start.
+That is why the binaries are built from the **wine-staging sources** (option B above).
 
-Wine-**Staging** 11.10 benutzt Server-Protokoll **943**, *vanilla* Wine 11.10 nur **942**.
-Ein aus den **Vanilla**-Quellen gebauter 11.10-wineserver gibt gegen die installierten
-Staging-Libs `wine client error:0: version mismatch 942/943` → FL startet nicht.
-Das 11.10-Binary muss daher aus den **wine-staging-Quellen** gebaut werden (siehe unten).
+`scripts/08-apply-wineserver-poolfix.sh` installs the fix: it detects the installed Wine
+version, builds the binary if it is missing, backs up the stock binary as
+`/usr/bin/wineserver.stock-<VER>`, replaces `/usr/bin/wineserver` atomically and runs a
+protocol test (rollback on failure).
 
-Einspielen erledigt `scripts/08-apply-wineserver-poolfix.sh` — das Script erkennt die
-installierte Wine-Version selbst und wählt das passende Binary (kopiert nach
-`/usr/bin/wineserver`, Backup als `/usr/bin/wineserver.orig`).
+## ⚠️ Surviving updates (IMPORTANT)
 
-## ⚠️ Update-Sicherheit (WICHTIG)
+Setting `WINESERVER` as an environment variable **does not work on Arch/CachyOS** - Wine always starts the hard-coded `/usr/bin/wineserver`. There is also **no** registry or config option for the pool size (it is compiled in). So `/usr/bin/wineserver` itself has to be replaced.
 
-`WINESERVER` als Umgebungsvariable **funktioniert auf Arch/CachyOS nicht** — Wine startet immer das fest verdrahtete `/usr/bin/wineserver`. Es gibt auch **keine** Registry-/Config-Option für die Pool-Größe (sie ist einkompiliert). Deshalb muss `/usr/bin/wineserver` direkt ersetzt werden.
-
-**Jedes `wine-staging`-Update überschreibt `/usr/bin/wineserver`** → der Fix ist dann weg und Fehler 1411 kommt zurück. Nach jedem Wine-Update neu einspielen — am einfachsten per Script (wählt automatisch das zur Version passende Binary):
+**Every `wine-staging` update overwrites `/usr/bin/wineserver`** → the fix is gone and error 1411 comes back. Either install the update automation once (see [docs/updating.md](../docs/updating.md)), or reinstall the fix after every Wine update:
 
 ```bash
 bash scripts/08-apply-wineserver-poolfix.sh
 ```
 
-Oder manuell das **zur installierten Version passende** Binary:
+The launcher (`scripts/run-flstudio.sh`) warns on start if `/usr/bin/wineserver` is not (or no longer) the pool version - once the pool fix has been set up with `./install.sh --pool-fix`.
 
-```bash
-# wine --version pruefen!
-sudo cp assets/wineserver-poolfix               /usr/bin/wineserver   # Wine 11.9
-sudo cp assets/wineserver-poolfix-11.10-staging /usr/bin/wineserver   # wine-staging 11.10
-```
+## What it is NOT (ruled-out dead ends)
 
-Der Launcher (`scripts/run-flstudio.sh`) warnt beim Start, falls `/usr/bin/wineserver` nicht (mehr) die Pool-Version ist – sobald der Pool-Fix per `./install.sh --pool-fix` eingerichtet wurde.
-
-## Was es NICHT ist (ausgeschlossene Sackgassen)
-
-- **ntsync** ist nicht die Ursache. Bei Pool-Erschöpfung hängt der Hauptthread zwar in `ntsync_char_ioctl` (Symptom: Hänger statt Absturz), aber Wine fällt bei fehlendem `/dev/ntsync` sauber zurück (`server/inproc_sync.c`: `if (get_inproc_device_fd() >= 0)`) und stürzt trotzdem mit 1411 ab. ntsync ist ein Performance-Feature → **nicht deaktivieren**.
-- In Wine 11.9 gibt es **keine** `WINEFSYNC/WINEESYNC/WINENTSYNC`-Variablen mehr (neue, serverseitig entschiedene „inproc sync"). Solche Zeilen im Launcher sind wirkungslos.
+- **ntsync** is not the cause. When the pool runs out, the main thread does hang in `ntsync_char_ioctl` (symptom: hang instead of crash), but without `/dev/ntsync` Wine falls back cleanly (`server/inproc_sync.c`: `if (get_inproc_device_fd() >= 0)`) and still crashes with 1411. ntsync is a performance feature → **don't disable it**.
+- Since Wine 11.9 there are **no** `WINEFSYNC`/`WINEESYNC`/`WINENTSYNC` variables any more (the new "inproc sync" is decided on the server side). Such lines in a launcher have no effect.

@@ -1,76 +1,76 @@
-# d2d1 Geometry Fix – Technische Dokumentation
+# d2d1 geometry fix – technical notes
 
-**Datei:** `dlls/d2d1/geometry.c` · **Stand:** Wine 11.19 (2026-10-13) · Upstream-Bug: [60115](https://bugs.winehq.org/show_bug.cgi?id=60115)
+**File:** `dlls/d2d1/geometry.c` · **Based on:** Wine 11.19 (2026-10-13), applies unchanged to 11.15–11.20 · **Upstream bug:** [60115](https://bugs.winehq.org/show_bug.cgi?id=60115)
 
-Wines Direct2D trianguliert jede gefüllte Pfad-Geometrie (Constrained Delaunay Triangulation, „CDT"). Plugin-Oberflächen, die über Direct2D zeichnen (JUCE-8-Plugins wie Serum 2, Ozone 11 usw.), erzeugen dabei regelmäßig **degenerierte Geometrie**: doppelte oder kollineare Eckpunkte, deckungsgleiche Bézierkurven. Mehrere Stellen in `geometry.c` terminieren bei solchen Eingaben nicht.
+Wine's Direct2D triangulates every filled path geometry (constrained Delaunay triangulation, "CDT"). Plugin interfaces that draw through Direct2D (JUCE 8 plugins such as Serum 2, Ozone 11 and others) regularly produce **degenerate geometry**: duplicate or collinear vertices, coincident Bézier curves. Several places in `geometry.c` never terminate on such input.
 
-**Symptom:** FL Studio friert ein, sobald ein Plugin-Fenster gezeichnet wird. Audio läuft weiter, die GUI ist tot (Main-Thread im Stack-Overflow → Zombie, oder er dreht in einer Endlosschleife). Einziger Ausweg: `wineserver -k`.
+**Symptom:** FL Studio freezes as soon as a plugin window is drawn. Audio keeps playing, the GUI is dead (the main thread died of a stack overflow and the process is a zombie, or it spins in an infinite loop). The only way out is `wineserver -k`.
 
-## Die fünf Fehlerstellen
+## The five defects
 
-(dazu eine Leistungsänderung, siehe unten)
+(plus a performance change, see below)
 
-Gefunden per Live-Debugging (2026-05) bzw. per Fuzzing mit zufälligen degenerierten Pfaden (2026-10, siehe unten).
+Found by live debugging (2026-05) and by fuzzing with random degenerate paths (2026-10, see below).
 
-| # | Funktion | Fehler (Stock-Wine) | Fix |
+| # | Function | Defect (stock Wine) | Fix |
 |---|---|---|---|
-| 1 | `d2d_cdt_insert_segment` | Endlos-Rekursion zwischen zwei Ursprüngen A→B→A → Stack-Overflow | Tail-Rekursion → `goto restart` + Iterationslimit `16 * edge_count + 0x10000` |
-| 2 | `d2d_cdt_insert_segment` (Skip-Pfade) | Der bisherige Patch übersprang ein Segment mit `return TRUE`, **ohne `*edge` zu setzen** → der Aufrufer setzte mit einem veralteten/freigegebenen Edge fort → Page-Fault | Skip-Pfade liefern über `d2d_cdt_find_vertex_edge()` einen gültigen Edge am Zielvertex (oder brechen sauber ab) |
-| 3 | `d2d_cdt_cut_edges` | Unbegrenzte (nicht-Tail-)Rekursion bei zyklischer Topologie → Stack-Overflow | Iterativ: gekreuzte Kanten erst sammeln, dann in umgekehrter Reihenfolge löschen (identisch zur Rekursion), Abbruch nach `edge_count` Schritten |
-| 4 | `d2d_cdt_fixup` | Face-Umlauf erreicht den Ursprung nie → Endlosschleife | Abbruch nach `2 * edge_count + 16` Schritten → `FALSE` (wie upstreams „Degenerate face") |
-| 5 | `d2d_geometry_resolve_beziers` | Überlappende Kontrolldreiecke werden endlos halbiert (jeder Split erzeugt neue Überlappungen), Speicher wächst ohne Ende | Gesamt-Budget `16 * Bézier-Anzahl + 1024` Splits pro Geometrie; danach bleibt die Restüberlappung (minimal ungenaue Füllung statt Hänger) |
+| 1 | `d2d_cdt_insert_segment` | Unbounded recursion between two origins A→B→A → stack overflow | Tail recursion → `goto restart` + iteration limit `16 * edge_count + 0x10000` |
+| 2 | `d2d_cdt_insert_segment` (skip paths) | The previous version of this patch skipped a segment with `return TRUE` **without setting `*edge`** → the caller continued with a stale/freed edge → page fault | The skip paths return a valid edge at the target vertex via `d2d_cdt_find_vertex_edge()` (or fail cleanly) |
+| 3 | `d2d_cdt_cut_edges` | Unbounded (non-tail) recursion on cyclic topology → stack overflow | Iterative: collect the crossed edges first, then delete them in reverse order (same order as the recursion), stop after `edge_count` steps |
+| 4 | `d2d_cdt_fixup` | The face walk never gets back to its origin → infinite loop | Stop after `2 * edge_count + 16` steps → `FALSE` (like upstream's "degenerate face" path) |
+| 5 | `d2d_geometry_resolve_beziers` | Overlapping control triangles are split forever (every split creates new overlaps), memory grows without bound | Budget of `16 * bezier_count + 1024` splits per geometry; after that the remaining overlap stays (a slightly imprecise fill instead of a hang) |
 
-Ein abgebrochener Pfad führt immer in einen bestehenden Fehlerpfad: Entweder wird ein Segment übersprungen oder die Füllung dieser einen Geometrie verworfen (`E_FAIL`, Geometrie wird nicht gefüllt). Nie ein Absturz, nie ein Hänger.
+Every bail-out ends in an existing error path: either one segment is skipped, or the fill of that single geometry is dropped (`E_FAIL`, the geometry isn't filled). Never a crash, never a hang.
 
-## Leistung: Umriss-Pfade ohne Füllflächen-Vorbereitung
+## Performance: stroked paths skip the fill preparation
 
-`d2d_geometry_sink_Close()` berechnet für alle Figuren die Selbstüberschneidungen (`d2d_geometry_intersect_self`, O(n²)), obwohl diese nur für die Triangulierung der Füllfläche gebraucht werden. Der Umriss entsteht bereits in `EndFigure()`. JUCE 8 erzeugt in `strokePath()` bei jedem Aufruf eine neue Geometrie mit `D2D1_FIGURE_BEGIN_HOLLOW` und zeichnet nur den Umriss.
+`d2d_geometry_sink_Close()` computes the self-intersections of every figure (`d2d_geometry_intersect_self`, O(n²)), although they are only needed to triangulate the fill. The outline is already built in `EndFigure()`. In `strokePath()`, JUCE 8 creates a new geometry with `D2D1_FIGURE_BEGIN_HOLLOW` on every call and only draws its outline.
 
-Der Patch überspringt Hollow-Figuren in `d2d_geometry_intersect_self` – Triangulierung und Bézier-Auflösung tun das bereits. Bei 400 Bézier-Segmenten sinkt `Close()` von 3,32 ms auf unter 0,01 ms, die Gesamtzeit pro Pfad von 3,58 auf 0,31 ms.
+The patch skips hollow figures in `d2d_geometry_intersect_self` - triangulation and Bézier resolution already do the same. With 400 Bézier segments, `Close()` drops from 3.32 ms to under 0.01 ms and the total time per path from 3.58 to 0.31 ms. Inside FL Studio this made no measurable difference (see [docs/verification.md](../docs/verification.md)), so this hunk is independent of the fixes above.
 
-## Speicherleck (upstream behoben, kam mit dem Rebuild)
+## Memory leak (fixed upstream, came with the rebuild)
 
-Die alte DLL (Wine 11.9) gab `figure->vertex_types` nie frei. Gemessen: **+17,5 KB pro Pfad-Geometrie**, mit der neuen DLL 0. Bei Plugin-UIs, die pro Frame Geometrien neu bauen, war das ein Dauerleck, solange das Fenster offen war.
+The old DLL (Wine 11.9) never freed `figure->vertex_types`. Measured: **+17.5 KB per path geometry**, 0 with the new DLL. For plugin interfaces that rebuild their geometry every frame, this was a constant leak for as long as the window was open.
 
-## Verifikation (2026-10-13)
+## Verification (2026-10-13)
 
-**Fuzzing** — zufällige Pfade auf einem 6×6-Raster (viele Duplikate/Kollinearitäten), 1–4 Figuren, Linien + Béziers, beide Füllmodi:
+**Fuzzing** - random paths on a 6×6 grid (many duplicates/collinear points), 1–4 figures, lines + Béziers, both fill modes (`tools/d2d1_fuzz.cpp`):
 
-| DLL | Ergebnis |
+| DLL | Result |
 |---|---|
-| Stock Wine 11.19 (builtin) | Stack-Overflows und Hänger in jedem 10.000er-Block |
-| Alte Patch-DLL (Wine 11.9) | Hänger in jedem 10.000er-Block (erster bei Seed 940) |
-| **Neue Patch-DLL (Wine 11.19)** | **240.000 Seeds: 0 Hänger, 0 Abstürze** |
+| Stock Wine 11.19 (builtin) | stack overflows and hangs in every block of 10,000 |
+| Old patched DLL (Wine 11.9) | hangs in every block of 10,000 (first at seed 940) |
+| **New patched DLL (Wine 11.19)** | **240,000 seeds: 0 hangs, 0 crashes** |
 
-**Wine-Testsuite** `dlls/d2d1/tests` (17.475 Einzeltests): Stock und gepatcht liefern **identische** Ergebnisse (0 Fehler im sauberen Prefix) → keine Regression bei korrekter Geometrie.
+**Wine test suite** `dlls/d2d1/tests` (17,475 tests): stock and patched give **identical** results (0 failures in a clean prefix) → no regression on well-formed geometry.
 
-## Die vorkompilierte DLL
+## The prebuilt DLL
 
-`assets/d2d1.dll.patched` — Wine Staging 11.19, x86_64, Builtin-Signatur bei 0x40 genullt.
+`assets/d2d1.dll.patched` - Wine Staging 11.19, x86_64, builtin marker at offset 0x40 zeroed.
 - **MD5:** `fd197f30b36451714e5fc5a7afc148c9`
-- d2d1 ist eine reine PE-DLL; sie funktioniert auch unter anderen Wine-Versionen. Neu bauen lohnt sich, wenn upstream in `dlls/d2d1/` Fehler behebt (wie das Leck oben).
+- d2d1 is a pure PE DLL, so it also works with other Wine versions. Rebuilding is worthwhile when upstream fixes bugs in `dlls/d2d1/` (like the leak above).
 
-## Neu bauen für eine neue Wine-Version
+## Rebuilding for a new Wine version
 
 ```bash
-# Quellbaum (bei Staging: patchinstall vorher), dann:
+# Source tree (for staging: run patchinstall first), then:
 cd wine-X.Y && patch -p1 < .../patches/d2d1-geometry-fix.patch
 mkdir ../build && cd ../build && ../wine-X.Y/configure --enable-win64
 make -j$(nproc) dlls/d2d1/x86_64-windows/d2d1.dll
 cp dlls/d2d1/x86_64-windows/d2d1.dll .../assets/d2d1.dll.patched
-bash .../scripts/04-apply-d2d1-patch.sh   # kopiert + nullt 0x40 + DllOverride
+bash .../scripts/04-apply-d2d1-patch.sh   # copies, zeroes 0x40, sets the DllOverride
 ```
 
-Prüfen, ob upstream d2d1 geändert hat (dann lohnt der Rebuild):
+Check whether upstream changed d2d1 (then a rebuild is worthwhile):
 
 ```bash
-diff -rq wine-ALT/dlls/d2d1/ wine-NEU/dlls/d2d1/ \
+diff -rq wine-OLD/dlls/d2d1/ wine-NEW/dlls/d2d1/ \
      --exclude="*.o" --exclude="*.dll" --exclude="Makefile" \
      --exclude="version.res" --exclude="x86_64-windows"
 ```
 
-Zwischen 11.9 und 11.19 hat upstream u. a. `device.c`, `effect.c`, `command_list.c` geändert und `sprite_batch.c` ergänzt — die alte DLL war also zehn Versionen hinterher.
+Between 11.9 and 11.19, upstream changed `device.c`, `effect.c` and `command_list.c` among others and added `sprite_batch.c` - so the old DLL was ten versions behind.
 
-## Bekannte Restgrenze
+## Known remaining limitation
 
-`d2d_device_context_DrawGeometry` ignoriert Strichstile (Strichelung, runde Enden/Ecken) — Wine zeichnet sie als durchgezogene Linien mit Standard-Enden. Das ist eine fehlende Funktion in Wine, kein Absturzrisiko. Der Launcher setzt `WINEDEBUG=fixme-all`, weil Wine dazu sonst pro Linie eine fixme-Zeile schreibt (gemessen 11.000 Zeilen/s bei offenem Plugin-Fenster).
+`d2d_device_context_DrawGeometry` ignores stroke styles (dashes, round caps/joins) - Wine draws them as solid lines with default caps. That is a missing feature in Wine, not a crash risk. The launcher sets `WINEDEBUG=fixme-all` because Wine otherwise writes one fixme line per line drawn (measured 11,000 lines/s with a plugin window open).

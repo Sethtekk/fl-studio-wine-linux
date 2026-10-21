@@ -1,58 +1,58 @@
-# Verifikation
+# Verification
 
-Was jede Änderung belegt, wie es gemessen wurde und was noch offen ist. Referenzsystem: CachyOS, KDE Plasma 6 (Wayland/XWayland), NVIDIA RTX 3080 mit Treiber 615, wine-staging 11.19, FL Studio 26.1.1.
+What each change is backed by, how it was measured and what is still open. Reference system: CachyOS, KDE Plasma 6 (Wayland/XWayland), NVIDIA RTX 3080 with driver 615, wine-staging 11.19, FL Studio 26.1.1.
 
-Belegstufen:
+Levels of evidence:
 
-| Stufe | Bedeutung |
+| Level | Meaning |
 |---|---|
-| **FL-Alltag** | im echten FL-Betrieb über Logs oder Messungen nachgewiesen |
-| **FL-Sitzung** | in einer FL-Sitzung beobachtet (Screenshot, Log), ohne gezielte Last |
-| **isoliert** | reproduzierbar außerhalb von FL getestet (Testhost, Benchmark, Fuzzer) |
-| **offen** | noch nicht nachgewiesen |
+| **daily FL use** | shown in real FL use through logs or measurements |
+| **FL session** | observed in an FL session (screenshot, log), without targeted load |
+| **isolated** | tested reproducibly outside FL (test host, benchmark, fuzzer) |
+| **open** | not shown yet |
 
-## Übersicht
+## Overview
 
-| Änderung | Belegstufe | Nachweis |
+| Change | Level | Evidence |
 |---|---|---|
-| EGL statt GLX (GL-Deadlock) | FL-Alltag | Watchdog-Log: 88 Deadlocks bis 31.08.2026 22:18, seitdem keiner (über 130 Sitzungen) |
-| d2d1-Fixes (Hänger/Abstürze) | isoliert + FL-Sitzung | Fuzzer, Wine-Testsuite; FL-Sitzungen mit Serum 2 ohne Absturz |
-| d2d1-Speicherleck | isoliert + FL-Sitzung | Testprogramm; 15 min FL mit offenem Serum 2: +0,37 MB/min |
-| d2d1-Leistung (Hollow-Figuren) | FL gemessen | Benchmark 11× schneller, **in FL bei Serum 2 kein messbarer Effekt** (55 % vs. 56 %) |
-| nih-plug-Absturz (baseview) | FL-Sitzung | Spectral Compressor, Diopser, Crisp in FL geöffnet und gerendert, 3× Alpha-Fallback im Log, kein Absturz |
-| Update-Automatik | System | Selbsttest als root bestanden |
-| `WINEDEBUG=fixme-all` | FL-Sitzung | 11 000 Logzeilen/s gemessen; Kosten 1–4 µs pro Zeichenaufruf |
-| Brio-Mikrofon trennen | Logik | Filter gegen echte und synthetische `pw-link`-Ausgabe getestet; Gerät beim Test nicht angeschlossen |
+| EGL instead of GLX (GL deadlock) | daily FL use | watchdog log: 88 deadlocks up to 2026-08-31 22:18, none since (more than 130 sessions) |
+| d2d1 fixes (hangs/crashes) | isolated + FL session | fuzzer, Wine test suite; FL sessions with Serum 2 without a crash |
+| d2d1 memory leak | isolated + FL session | test program; 15 min of FL with Serum 2 open: +0.37 MB/min |
+| d2d1 performance (hollow figures) | measured in FL | benchmark 11× faster, **no measurable effect with Serum 2 in FL** (55 % vs. 56 %) |
+| nih-plug crash (baseview) | FL session | Spectral Compressor, Diopser, Crisp opened and rendered in FL, alpha fallback logged 3×, no crash |
+| Update automation | system | self-test as root passed |
+| `WINEDEBUG=fixme-all` | FL session | 11,000 log lines/s measured; cost 1–4 µs per draw call |
+| Disconnecting the Brio microphone | logic | filter tested against real and synthetic `pw-link` output; device was not connected during the test |
 
-## GL-Deadlock
+## GL deadlock
 
-Der Watchdog `fl-unfreeze` prüft alle 5 s, ob FLs Main-Thread in einem Lock-Zyklus aus NVIDIA-GL-Mutex und Xlib-Antwort hängt, und protokolliert jeden Eingriff.
+The `fl-unfreeze` watchdog checks every 5 s whether FL's main thread is stuck in a lock cycle between the NVIDIA GL mutex and an Xlib reply, and logs every intervention.
 
-- Bis zum 31.08.2026: 88 erkannte Deadlocks, an einzelnen Tagen bis zu 27 Eingriffe.
-- Umstellung auf `UseEGL=Y` am 31.08.2026; letzter Deadlock am selben Abend um 22:18.
-- Seitdem über 130 FL-Sitzungen ohne Deadlock.
+- Up to 2026-08-31: 88 detected deadlocks, up to 27 interventions on a single day.
+- Switched to `UseEGL=Y` on 2026-08-31; the last deadlock was the same evening at 22:18.
+- Since then more than 130 FL sessions without a deadlock.
 
 ## d2d1
 
-**Fuzzer** (`tools/d2d1_fuzz.cpp`): zufällige Pfade auf einem 6×6-Raster, 1–4 Figuren, Linien und Béziers, beide Füllmodi.
+**Fuzzer** (`tools/d2d1_fuzz.cpp`): random paths on a 6×6 grid, 1–4 figures, lines and Béziers, both fill modes.
 
-| DLL | Ergebnis |
+| DLL | Result |
 |---|---|
-| Stock Wine 11.19 | Stack-Overflows und Hänger in jedem Block à 10 000 Fällen |
-| frühere Patch-DLL (Wine 11.9) | Hänger in jedem Block, erster bei Seed 940 |
-| aktuelle Patch-DLL | 240 000 Fälle ohne Fehler (nach dem Leistungsfix erneut 120 000) |
+| Stock Wine 11.19 | stack overflows and hangs in every block of 10,000 cases |
+| earlier patched DLL (Wine 11.9) | hangs in every block, first one at seed 940 |
+| current patched DLL | 240,000 cases without a failure (another 120,000 after the performance fix) |
 
-**Wine-Testsuite** `dlls/d2d1/tests`: 17 475 Tests, Stock und Patch mit identischem Ergebnis (0 Fehler im sauberen Prefix).
+**Wine test suite** `dlls/d2d1/tests`: 17,475 tests, identical results for stock and patched (0 failures in a clean prefix).
 
-**Speicher:** 2000 Pfad-Geometrien erzeugen und freigeben – Wine-11.9-DLL +35 MB, 11.19-DLL +0,2 MB. In FL (11.19-DLL) mit Projekt und offener Serum-2-Oberfläche über 15 min: RSS 6886 → 6892 MB.
+**Memory:** creating and releasing 2,000 path geometries - Wine 11.9 DLL +35 MB, 11.19 DLL +0.2 MB. In FL (11.19 DLL) with a project and the Serum 2 interface open for 15 min: RSS 6886 → 6892 MB.
 
-**Leistung** (`tools/d2d1_strokebench.cpp`, 400 Bézier-Segmente, nur Umriss): `Close()` 3,32 ms → < 0,01 ms, gesamt pro Pfad 3,58 → 0,31 ms.
+**Performance** (`tools/d2d1_strokebench.cpp`, 400 Bézier segments, outline only): `Close()` 3.32 ms → < 0.01 ms, total per path 3.58 → 0.31 ms.
 
-**In FL beobachtet:** Während Serum 2 zeichnete (bis zu 11 000 Direct2D-Aufrufe/s), lag FLs Main-Thread bei 64–82 % statt 24 % im Leerlauf (Sitzung ab 19:42, DLL ohne Leistungsfix). In dieselben Minuten fiel allerdings das Laden eines großen Projekts (RSS 1,9 → 6,8 GB); der Anteil von Serum ist daraus nicht sauber abzugrenzen. Eine gezielte Vergleichsmessung mit dem Leistungsfix steht aus.
+**Observed in FL:** while Serum 2 was drawing (up to 11,000 Direct2D calls/s), FL's main thread was at 64–82 % instead of 24 % when idle (session from 19:42, DLL without the performance fix). However, a large project was loading during the same minutes (RSS 1.9 → 6.8 GB), so Serum's share cannot be separated cleanly. See the targeted measurement below.
 
 ## Plugins
 
-**Absturz in FL beobachtet** (13.10.2026, 20:12:56, alte Builds):
+**Crash observed in FL** (2026-10-13, 20:12:56, old builds):
 
 ```
 panicked at 'Could not create OpenGL context: CreationFailed(())' … baseview/src/win/window.rs:703
@@ -60,68 +60,68 @@ thread caused non-unwinding panic. aborting.
 err:seh:NtRaiseException Unhandled exception code c0000409
 ```
 
-**Im CLAP-Testhost** (`tools/clap_guitest.c`, EGL, NVIDIA):
+**In the CLAP test host** (`tools/clap_guitest.c`, EGL, NVIDIA):
 
-| Plugin | offizieller Build | Neubau mit baseview-Patch |
+| Plugin | Official build | Rebuilt with the baseview patch |
 |---|---|---|
-| Spectral Compressor | Absturz | Editor 1360×530 gerendert, sauber beendet |
-| Diopser | Absturz | Editor 600×490 gerendert, sauber beendet |
-| Crisp | Absturz | Editor 400×390 gerendert, sauber beendet |
+| Spectral Compressor | crash | editor 1360×530 rendered, exits cleanly |
+| Diopser | crash | editor 600×490 rendered, exits cleanly |
+| Crisp | crash | editor 400×390 rendered, exits cleanly |
 
-Der Neubau per `scripts/09-build-nih-plug.sh` wurde frisch aus Upstream wiederholt und im Testhost erneut bestätigt.
+The rebuild with `scripts/09-build-nih-plug.sh` was repeated from a fresh upstream checkout and confirmed again in the test host.
 
-**Im VST2-Testhost** (`tools/vst2_guitest.c`, im FL-Prefix): CamelCrusher und Serum 1 rendern fehlerfrei; längste Idle-Runde 4 ms bzw. einmalig 1,3 s beim ersten Zeichnen (DXVK-Initialisierung).
+**In the VST2 test host** (`tools/vst2_guitest.c`, in the FL prefix): CamelCrusher and Serum 1 render without errors; longest idle round 4 ms, and a one-off 1.3 s on the first draw (DXVK initialisation).
 
-**In FL-Sitzungen gesehen** (Screenshots): Serum 2, Fruity Parametric EQ 2, Youlean Loudness Meter 2, Voxengo SPAN und iZotope-Oberflächen ohne Darstellungsfehler.
+**Seen in FL sessions** (screenshots): Serum 2, Fruity Parametric EQ 2, Youlean Loudness Meter 2, Voxengo SPAN and iZotope interfaces without rendering errors.
 
-## FL-Sitzungen am 13.10.2026
+## FL sessions on 2026-10-13
 
-| Start | Ende | d2d1 | Ergebnis |
+| Start | End | d2d1 | Result |
 |---|---|---|---|
-| 19:42 | 20:12 | 11.19-DLL ohne Leistungsfix | Absturz beim Öffnen eines nih-plug-Editors (alter Plugin-Build) |
-| 20:14 | 20:33 | nicht geladen | regulär beendet, keine `err:`-Meldungen außer den bekannten Start-Meldungen |
-| 20:41 | 20:53 | aktuelle DLL mit Leistungsfix, Serum 2 geladen | regulär beendet, kein Absturz, kein Deadlock |
+| 19:42 | 20:12 | 11.19 DLL without the performance fix | crash when opening a nih-plug editor (old plugin build) |
+| 20:14 | 20:33 | not loaded | normal exit, no `err:` messages apart from the known start-up ones |
+| 20:41 | 20:53 | current DLL with the performance fix, Serum 2 loaded | normal exit, no crash, no deadlock |
 
-Bekannte, harmlose Meldungen bei jedem Start: `err:hid:udev_bus_init`, `err:service:device_notify_proc`, `err:ole:… {4ce576fa-…} not registered`. Die Zeile `… Getötet pw-jack wine …` am Sitzungsende ist Wines Umsetzung von `TerminateProcess` und kein Absturz.
+Known, harmless messages on every start: `err:hid:udev_bus_init`, `err:service:device_notify_proc`, `err:ole:… {4ce576fa-…} not registered`. A "Killed pw-jack wine …" line at the end of a session is how Wine implements `TerminateProcess`, not a crash.
 
-## Update-Automatik
+## Update automation
 
-Ursache der früheren Ausfälle (aus `/var/log/pacman.log`): Der Hook baute während der Transaktion, und der Download brach nach 27 bzw. 86 ms ab. Beide Transaktionen aktualisierten gleichzeitig Netzwerk-Komponenten (25.09.: `systemd`, `mullvad-vpn-daemon`; 13.10.: `networkmanager`, `openvpn`). Das wine-staging-Update selbst lief jeweils durch; der Pool-Fix musste von Hand nachgeholt werden.
+Cause of the earlier failures (from `/var/log/pacman.log`): the hook built during the transaction, and the download aborted after 27 and 86 ms. Both transactions updated network components at the same time (2026-09-25: `systemd` and a VPN daemon; 2026-10-13: `networkmanager`, `openvpn`). The wine-staging update itself went through each time; the pool fix had to be reinstalled by hand.
 
-Selbsttest nach der Installation (`install-fl-wine-automation.sh --selftest`):
+Self-test after installation (`install-fl-wine-automation.sh --selftest`, output translated from the German messages used at the time):
 
 ```
-[poolfix-maintain] wineserver (11.19) ist kein Pool-Fix - repariere.
-[poolfix] Pool-Fix für wine-staging 11.19 eingespielt (md5 eb6884bc…).
-[poolfix] Protokolltest OK.
-== ERGEBNIS: OK - Pool-Fix automatisch wiederhergestellt
+[poolfix-maintain] wineserver (11.19) is not the pool fix - repairing.
+[poolfix] Pool fix for wine-staging 11.19 installed (md5 eb6884bc…).
+[poolfix] Protocol test OK.
+== RESULT: OK - pool fix restored automatically
 ```
 
-Ohne root getestet: alle Zweige des Hook-Appliers (Binary aktiv, fehlt, manipuliert, mehrere Hashes) sowie der Vorab-Build mit simulierter `checkupdates`-Ausgabe einschließlich Download (32 s).
+Tested without root: every branch of the hook script (binary active, missing, tampered with, several hashes) and the pre-build with simulated `checkupdates` output, including the download (32 s).
 
-Hinweis: `sudo` braucht ein Terminal für die Passworteingabe. Aus Werkzeugen ohne TTY (z. B. dem `!`-Präfix in Claude Code) scheitert es; dort hilft `pkexec`, das einen grafischen Dialog öffnet.
+Note: `sudo` needs a terminal to ask for the password. It fails from tools without a TTY (e.g. the `!` prefix in Claude Code); `pkexec`, which opens a graphical dialog, works there.
 
-## Messung in FL am 13.10.2026, 21:16–21:21
+## Measurement in FL on 2026-10-13, 21:16–21:21
 
-Testprojekt mit Serum 2 (Init-Preset, 4 Steps, 140 BPM), Master stumm, Wiedergabe, Fenster per uinput-Eingaben bedient:
+Test project with Serum 2 (init preset, 4 steps, 140 BPM), master muted, playing; windows operated through uinput events:
 
-| Bedingung | Main-Thread | Gesamt-CPU | RSS |
+| Condition | Main thread | Total CPU | RSS |
 |---|---|---|---|
-| neue d2d1, Serum-Fenster offen | 55,5–56,3 % | ~75 % | flach |
-| neue d2d1, Serum-Fenster zu | 16,3–16,6 % | ~23 % | flach |
-| alte d2d1 (ohne Hollow-Fix), Serum-Fenster offen | 54,4–55,5 % | ~75 % | flach |
+| new d2d1, Serum window open | 55.5–56.3 % | ~75 % | flat |
+| new d2d1, Serum window closed | 16.3–16.6 % | ~23 % | flat |
+| old d2d1 (without the hollow fix), Serum window open | 54.4–55.5 % | ~75 % | flat |
 
-Serums Oberfläche kostet rund 40 Prozentpunkte eines Kerns; der Hollow-Fix ändert daran nichts. PC-Stichprobe (40 Samples): libc 19, d2d1 7, d3d11 (DXVK) 5, ntdll 4 – kein einzelner Hotspot in d2d1.
+Serum's interface costs about 40 percentage points of one core; the hollow fix doesn't change that. PC sampling (40 samples): libc 19, d2d1 7, d3d11 (DXVK) 5, ntdll 4 - no single hotspot in d2d1.
 
-**Plugins in FL:** Spectral Compressor, Diopser und Crisp öffnen und rendern fehlerfrei, gleichzeitig offen, FL stabil.
+**Plugins in FL:** Spectral Compressor, Diopser and Crisp open and render without errors, all open at the same time, FL stable.
 
-**Neu gefundene Auffälligkeiten:**
-- **MIDI-Startfehler (behoben):** `PipeWire-System - input` und `PipeWire-RT-Event - input` waren als MIDI-Eingänge aktiv und scheiterten bei jedem Start (zwei Dialoge „Der Treiber konnte nicht gestartet werden“, MIDI-Fenster öffnet sich). Beide in FL deaktiviert (`HKCU\Software\Image-Line\FL Studio 26\Devices\MIDI input\… Enabled=0`); nächster Start ohne Dialog.
-- **Darstellungsfehler (offen):** Wird ein Plugin-Fenster mit Vulkan/D3D-Inhalt (Serum 2) innerhalb von FL verschoben, bleibt das alte Bild an der alten Stelle, bis das Plugin neu zeichnet. Bei Wiedergabe korrigiert es sich sofort, im Leerlauf erst bei Interaktion. Vermutete Ursache: Wine stößt nach dem Verschieben der client surface kein Neuzeichnen an.
+**Newly found issues:**
+- **MIDI start-up error (fixed):** `PipeWire-System - input` and `PipeWire-RT-Event - input` were enabled as MIDI inputs and failed on every start (two "the driver could not be started" dialogs, the MIDI window opens). Both disabled in FL (`HKCU\Software\Image-Line\FL Studio 26\Devices\MIDI input\… Enabled=0`); the next start showed no dialog.
+- **Rendering glitch (open):** when a plugin window with Vulkan/D3D content (Serum 2) is moved inside FL, the old image stays at the old position until the plugin redraws. During playback it corrects itself immediately; when idle only on interaction. Suspected cause: Wine doesn't trigger a redraw after the client surface is moved.
 
-## Offen
+## Open
 
-- Serums UI-Last (~40 Prozentpunkte) weiter aufschlüsseln (libc-Anteil, DXVK-Present).
-- Darstellungsfehler beim Verschieben von Vulkan-Plugin-Fenstern in Wine beheben.
-- Erstes echtes wine-staging-Update mit Vorab-Build abwarten.
-- JUCE-OpenGL-Plugins (Kickstart 2, Youlean, GrapHack, iZotope): Pixelformat-Mechanismus geprüft, Oberflächen nicht einzeln im Testhost.
+- Break down Serum's UI load (~40 percentage points) further (libc share, DXVK present).
+- Fix the rendering glitch when moving Vulkan plugin windows in Wine.
+- Wait for the first real wine-staging update with a pre-build.
+- JUCE OpenGL plugins (Kickstart 2, Youlean, GrapHack, iZotope): pixel-format mechanism checked, interfaces not tested one by one in the test host.
