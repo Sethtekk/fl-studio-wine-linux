@@ -71,6 +71,32 @@ diff -rq wine-OLD/dlls/d2d1/ wine-NEW/dlls/d2d1/ \
 
 Between 11.9 and 11.19, upstream changed `device.c`, `effect.c` and `command_list.c` among others and added `sprite_batch.c` - so the old DLL was ten versions behind.
 
+## Upstream submission (in progress, 2026-10-21)
+
+The fix is being prepared as a merge request for Wine (announced in [bug 60115, comment 4](https://bugs.winehq.org/show_bug.cgi?id=60115#c4)). Against current Wine master (after 11.20) it is split into one commit per defect, without the hollow-figure change:
+
+1. `d2d1: Factor out d2d_cdt_find_vertex_edge().` (no functional change)
+2. `d2d1: Avoid unbounded recursion in d2d_cdt_insert_segment().`
+3. `d2d1: Avoid unbounded recursion in d2d_cdt_cut_edges().`
+4. `d2d1: Limit Bezier splitting in d2d_geometry_resolve_beziers().`
+5. `d2d1: Bound the face walk in d2d_cdt_fixup().`
+
+Each commit builds without warnings, and after each one the d2d1 test suite gives the same result as unpatched Wine (17,475 tests, 0 failures, 245 todo, 1 skipped). The final state is identical to `d2d1-geometry-fix.patch` minus the hollow-figure hunks.
+
+**Which commit fixes what** - the fuzzer's first 14 failing seeds against unpatched Wine 11.20 (seeds 0–15,327), each replayed on its own:
+
+| Seeds | Unpatched | Fixed by | `Close()` afterwards |
+|---|---|---|---|
+| 2619, 2935, 4855, 7037, 8500, 9620, 9708, 11154, 13065, 14118, 15327 | crash (stack overflow) | 2 – `d2d_cdt_insert_segment` | `S_OK` for 9, `E_FAIL` for 2935 and 14118 |
+| 940 | hang | 5 – `d2d_cdt_fixup` | `E_FAIL` |
+| 6819, 15155 | hang | 4 – Bézier limit | `S_OK` |
+
+With commit 2 applied, the fuzzer (seeds 0 to ~56,000) found only hangs; the 12 that were replayed are all fixed by commits 4 and 5. **No input that needs commit 3 (`d2d_cdt_cut_edges`) has been found yet**, so that commit currently has no reproducer.
+
+`E_FAIL` means the fill of that one geometry is dropped. Windows most likely returns `S_OK` for these paths, so regression tests for them will need `todo_wine`.
+
+Still open: regression tests from minimized seeds (the first one, from seed 4855, is down to two figures and seven segments), the decision on commit 3, and the submission itself.
+
 ## Known remaining limitation
 
 `d2d_device_context_DrawGeometry` ignores stroke styles (dashes, round caps/joins) - Wine draws them as solid lines with default caps. That is a missing feature in Wine, not a crash risk. The launcher sets `WINEDEBUG=fixme-all` because Wine otherwise writes one fixme line per line drawn (measured 11,000 lines/s with a plugin window open).

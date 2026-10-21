@@ -155,4 +155,4 @@ This is a user report, not our measurement. With a second, unrelated system it i
 - Wait for the first real wine-staging update with a pre-build.
 - JUCE OpenGL plugins (Kickstart 2, Youlean, GrapHack, iZotope): pixel-format mechanism checked, interfaces not tested one by one in the test host.
 - Gopher freeze: identify the Win32 call behind the message loop; seen only once so far.
-- d2d1 upstream: split the patch into one commit per defect, add regression tests from fuzzer seeds and open a merge request on gitlab.winehq.org (announced in [bug 60115, comment 4](https://bugs.winehq.org/show_bug.cgi?id=60115#c4)).
+- d2d1 upstream: patch split into five commits against Wine master, each built and tested (see [patches/d2d1-geometry-fix.md](../patches/d2d1-geometry-fix.md#upstream-submission-in-progress-2026-10-21)); still missing: regression tests from minimized fuzzer seeds, a reproducer for the `d2d_cdt_cut_edges` change, and the merge request itself.

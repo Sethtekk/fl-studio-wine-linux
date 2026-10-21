@@ -3,6 +3,11 @@
 # Builds the patched crypt32.dll (patches/crypt32-authattr-order.patch)
 # for one Wine version and stores it in assets/crypt32-fix/<version>/.
 #
+# Upstream Wine fixed the same problem in commit a358d7ec ("crypt32:
+# Preserve authenticated attribute order when verifying signatures."),
+# merged into master on 2026-10-19 after the 11.20 release. Wine versions
+# that contain it don't need this DLL.
+#
 #   bash scripts/build-crypt32-fix.sh            # installed Wine version
 #   bash scripts/build-crypt32-fix.sh 10.20      # any version
 #
