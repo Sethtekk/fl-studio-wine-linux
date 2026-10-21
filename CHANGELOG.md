@@ -4,6 +4,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Findings from daily use (2026-10-21)
+- Troubleshooting: FL freezing after opening Gopher (WebView2 panel) and how to recover without losing the project.
+- Troubleshooting and plugin list: ZGameEditor Visualizer keeps FL's UI thread busy even with its window closed.
+- Plugin list: Rare (Analog Obsession, 2020 build) oscillates at 22,050 Hz with oversampling at 44.1 kHz - a plugin bug, with a workaround.
+- `tools/fl-perf-log.sh`: logs UI thread, process and wineserver CPU, context switches, memory and PipeWire xruns of a running FL.
+
 ### Support for all distributions (2026-10-16)
 - `install.sh`: one command for the complete setup (distro and GPU detection, options `--fl-installer`, `--wineasio`, `--splice-installer`, `--pool-fix`, `--yes`); `uninstall.sh` (keeps the prefix, `--purge` asks first).
 - `01-install-wine.sh` supports the Arch family, Debian/Ubuntu/Mint/Pop!_OS (WineHQ repository), Fedora and openSUSE; the package step was tested in fresh containers. Arch no longer needs `multilib` (wine-staging is WoW64).

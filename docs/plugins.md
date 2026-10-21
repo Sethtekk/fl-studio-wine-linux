@@ -14,6 +14,8 @@ Tested with wine-staging 11.19, EGL, NVIDIA 615, KDE Plasma 6 (Wayland/XWayland)
 | Crisp | VST3/CLAP | OpenGL (nih-plug/vizia) | ⚠️ rebuild needed | same as above |
 | Safety Limiter, Soft Vacuum, Puberty Simulator, Loudness War Winner, Buffr Glitch, Crossover | VST3 | no custom GUI | ✅ | Contain no baseview code |
 | Kickstart 2, Youlean Loudness Meter 2, GrapHack, iZotope Neutron 4 / Tonal Balance Control 2 | VST2/VST3 | OpenGL (JUCE and others) | ✅ pixel format checked | JUCE picks a format without alpha via `ChoosePixelFormat`; not every GUI was tested in the test host |
+| ZGameEditor Visualizer | FL native | OpenGL | ⚠️ heavy UI load | Keeps rendering in FL's UI thread even with its window closed (~90 % → ~47 % of a core after disabling it). Disable it while working. |
+| Rare (Analog Obsession, build from 2020-02-26) | VST2/VST3 | – | ⚠️ plugin bug | With oversampling on at 44.1 kHz it oscillates at 22,050 Hz, see [Rare](#rare-oscillation-at-441-khz). Not a Wine problem. |
 
 ## nih-plug
 
@@ -48,6 +50,18 @@ Verified in the CLAP test host (EGL, NVIDIA):
 | Diopser | crash | editor 600×490, exits cleanly |
 | Crisp | crash | editor 400×390, exits cleanly |
 
+## Rare: oscillation at 44.1 kHz
+
+**Symptom:** with Rare (Analog Obsession) on a track, an analyzer such as SPAN shows a growing peak at the very top of the spectrum. Over time it becomes a loud tone at 22,050 Hz - after 30–45 minutes it can reach almost full scale, which can damage tweeters.
+
+**Cause:** a bug in the Windows build dated 2020-02-26. With **oversampling on at 44.1 kHz**, the output oscillates at exactly half the sample rate. It grows by about 0.1–0.15 dB per second, even without an input signal, regardless of the EQ settings. At 48 kHz, or with oversampling off, it does not happen.
+
+**It is not caused by Wine:** reproduced offline with the VST2 test host outside FL Studio, with the same result with and without flush-to-zero / denormals-are-zero.
+
+**Bypass does not help:** FL's bypass stops passing the signal, but the plugin keeps processing internally. When you turn bypass off again, the accumulated tone comes out at once. Only removing the plugin, or reloading it, resets it.
+
+**What to do:** at 44.1 kHz, switch Rare's oversampling off and then reload the plugin. Check whether a newer build is available from Analog Obsession.
+
 ## Direct2D performance (Serum 2 and other JUCE 8 plugins)
 
 On Windows, JUCE 8 draws through Direct2D. `Direct2DGraphicsContext::strokePath()` creates a new path geometry with `D2D1_FIGURE_BEGIN_HOLLOW` on **every** call and only draws its outline. Wine still computed all self-intersections of the figure (O(n²)) in `Close()` - work that is only needed for filled areas.
@@ -77,5 +91,6 @@ make
 | `vst2_guitest.exe <plugin.dll> <s>` | The same for VST2; measures the editor's longest idle round |
 | `d2d1_fuzz.exe <seed> <count>` | Generates degenerate paths and finds hangs and crashes in d2d1 |
 | `d2d1_strokebench.exe <n> <segments> <bezier>` | Measures building, `Close()` and `DrawGeometry` of stroked paths |
+| `fl-perf-log.sh [seconds]` | Linux script, no build needed: logs CPU of FL's UI thread, the FL process and the wineserver, context switches, memory and PipeWire xruns every 2 s |
 
 A test run in a separate prefix does not affect a running FL session.

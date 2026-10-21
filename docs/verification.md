@@ -22,6 +22,9 @@ Levels of evidence:
 | nih-plug crash (baseview) | FL session | Spectral Compressor, Diopser, Crisp opened and rendered in FL, alpha fallback logged 3×, no crash |
 | Update automation | system | self-test as root passed |
 | `WINEDEBUG=fixme-all` | FL session | 11,000 log lines/s measured; cost 1–4 µs per draw call |
+| Gopher freeze: rescue by ending WebView2 | FL session (once) | live incident 2026-10-19, see below |
+| ZGameEditor Visualizer UI load | FL session | UI thread ~90 % → ~47 % after disabling it (2026-10-18) |
+| Rare oscillation (plugin bug) | isolated | offline in the VST2 test host, see below |
 | Disconnecting the Brio microphone | logic | filter tested against real and synthetic `pw-link` output; device was not connected during the test |
 
 ## GL deadlock
@@ -119,9 +122,18 @@ Serum's interface costs about 40 percentage points of one core; the hollow fix d
 - **MIDI start-up error (fixed):** `PipeWire-System - input` and `PipeWire-RT-Event - input` were enabled as MIDI inputs and failed on every start (two "the driver could not be started" dialogs, the MIDI window opens). Both disabled in FL (`HKCU\Software\Image-Line\FL Studio 26\Devices\MIDI input\… Enabled=0`); the next start showed no dialog.
 - **Rendering glitch (open):** when a plugin window with Vulkan/D3D content (Serum 2) is moved inside FL, the old image stays at the old position until the plugin redraws. During playback it corrects itself immediately; when idle only on interaction. Suspected cause: Wine doesn't trigger a redraw after the client surface is moved.
 
+## Findings 2026-10-18/19
+
+**Gopher / WebView2 (2026-10-19, one incident):** after opening Gopher in FL Studio 2026, FL stopped responding while audio kept playing. FL's UI thread was not blocked but busy (~20 % of a core) in a loop of wineserver requests; the wineserver used ~80 % of a core. The unix-side stack of the UI thread showed window callbacks nested five levels deep (`win32u` ↔ `ntdll`). No Gopher window existed. Ending the `msedgewebview2.exe` processes brought the wineserver down to ~10 % and the UI thread back to normal OpenGL drawing; FL stayed open. The Win32 call behind the loop was not identified. For comparison, a normally running FL measured later showed ~13 % wineserver CPU and ~23,000 context switches/s of the UI thread, so context switches alone don't identify this case.
+
+**ZGameEditor Visualizer (2026-10-18):** in a project where FL felt sluggish, the UI thread used ~90 % of a core (FL in total ~185 %). The ZGameEditor Visualizer in the mixer kept rendering, also with its window closed. After disabling it: UI thread ~47 %, FL ~145 %. Closing SPAN and Youlean only reduced the total by ~20 points. Audio, memory and the PipeWire quantum were fine during the measurement.
+
+**Rare oversampling (2026-10-18):** a growing tone at exactly 22,050 Hz on FL's output (measured with `pw-record`), rising ~0.1 dB/s without input. Reproduced offline in a VST2 test host with the 2020 Windows build: parameter 10 (oversampling) on at 44.1 kHz → the Nyquist component grows after ~2 minutes by ~0.15 dB/s, independent of the EQ settings and of FTZ/DAZ. At 48 kHz or with oversampling off it does not occur.
+
 ## Open
 
 - Break down Serum's UI load (~40 percentage points) further (libc share, DXVK present).
 - Fix the rendering glitch when moving Vulkan plugin windows in Wine.
 - Wait for the first real wine-staging update with a pre-build.
 - JUCE OpenGL plugins (Kickstart 2, Youlean, GrapHack, iZotope): pixel-format mechanism checked, interfaces not tested one by one in the test host.
+- Gopher freeze: identify the Win32 call behind the message loop; seen only once so far.

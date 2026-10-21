@@ -5,7 +5,7 @@
 To see FL's output, start it from a terminal: `flstudio-wine`. FL's own logs are in
 `~/.wine-flstudio/drive_c/users/$USER/Documents/Image-Line/FL Studio/Support/Logs/`.
 
-Contents: [Freezes](#fl-studio-freezes) · [Crash when opening a plugin](#fl-studio-closes-when-opening-a-plugin) · [Error 1411](#error-1411-class-does-not-exist) · [High CPU](#high-cpu-load-with-plugin-windows-open) · [Audio](#audio) · [Splice](#splice) · [Driver error dialogs](#the-driver-could-not-be-started-on-every-start) · [Misc](#misc)
+Contents: [Freezes](#fl-studio-freezes) · [Gopher](#fl-studio-freezes-after-opening-gopher) · [Crash when opening a plugin](#fl-studio-closes-when-opening-a-plugin) · [Error 1411](#error-1411-class-does-not-exist) · [High CPU](#high-cpu-load-with-plugin-windows-open) · [Audio](#audio) · [Splice](#splice) · [Driver error dialogs](#the-driver-could-not-be-started-on-every-start) · [Misc](#misc)
 
 ## FL Studio freezes
 
@@ -16,12 +16,29 @@ First find out which kind of freeze it is:
 | Freeze when opening a plugin window | patched d2d1 missing (a Wine update can reset it) | `bash scripts/04-apply-d2d1-patch.sh` – the launcher normally does this itself |
 | UI stuck, audio keeps playing, NVIDIA | GL deadlock (GLX) | check `UseEGL` (below) |
 | Hangs while loading a big project | wineserver pool exhausted | see [error 1411](#error-1411-class-does-not-exist) |
+| UI stuck right after opening **Gopher**, audio keeps playing | message storm with the Gopher WebView2 panel | see [Gopher](#fl-studio-freezes-after-opening-gopher) – FL can be saved |
 
 ```bash
 WINEPREFIX=~/.wine-flstudio wine reg query 'HKCU\Software\Wine\X11 Driver' /v UseEGL   # must be Y (or absent)
 ```
 
-Emergency exit: `WINEPREFIX=~/.wine-flstudio wineserver -k`. Autosaves are in `Documents/Image-Line/FL Studio/Projects/Backup` inside the prefix.
+Emergency exit: `WINEPREFIX=~/.wine-flstudio wineserver -k`. Autosaves are in `Documents/Image-Line/FL Studio/Projects/Backup` inside the prefix, or in a `Backup` folder next to the project file.
+
+To see what FL is doing before you kill it: `bash tools/fl-perf-log.sh 30` logs the CPU of the UI thread, the whole process and the wineserver every 2 seconds.
+
+## FL Studio freezes after opening Gopher
+
+Gopher, the AI assistant in FL Studio 2025/2026, runs in an embedded Microsoft Edge WebView2 window that belongs to a separate process (`msedgewebview2.exe`). Under Wine, opening it can lock up FL: the window never appears, the UI stops responding, audio keeps playing.
+
+This is **not** the GL deadlock: FL's UI thread keeps using CPU, and the wineserver is far busier than usual (observed: ~80 % of a core instead of ~13 %). The UI thread's stack shows window callbacks nested several levels deep, which points to FL and the WebView2 window sending each other messages in a loop. The exact Win32 call involved has not been identified; this has been seen once so far.
+
+**Rescue without losing the project:** end only the WebView2 processes - FL stays open and recovers:
+
+```bash
+pkill -f -- '--webview-exe-name=FL64.exe'
+```
+
+Then use *Save as* with a new name and restart FL Studio. **Prevention:** don't open Gopher under Wine.
 
 ## FL Studio closes when opening a plugin
 
@@ -38,6 +55,8 @@ Only with very large projects: the wineserver's shared-session pool runs out. On
 - Is `WINEDEBUG=fixme-all` set (the launcher does that)? Without it, d2d1 writes up to 11,000 log lines per second.
 - Is the d2d1 patch current? `bash scripts/doctor.sh`.
 - About 25 % of one core when idle is normal: FL redraws its UI at 60 Hz.
+- **ZGameEditor Visualizer** keeps rendering in FL's UI thread even with its window closed. In one project it held the UI thread at ~90 % of a core; disabling it in the mixer brought that down to ~47 %. Remove or disable it while you work.
+- To find the culprit: `bash tools/fl-perf-log.sh 60`, then close or disable plugins one at a time and watch the `Main%` column.
 
 ## Audio
 
