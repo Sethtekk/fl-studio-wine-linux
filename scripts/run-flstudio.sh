@@ -76,6 +76,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Local additions that only fit your own setup (fixed routing, mixer levels
+# of your interface, ...) go into this file instead of this script, so that
+# `git pull` never overwrites them. It is sourced, so it sees WINEPREFIX etc.;
+# put anything that waits for FL's ports in a background subshell ( ... ) &.
+FLW_HOOK="${FLW_CONFIG_FILE%/*}/pre-start.sh"
+# shellcheck source=/dev/null
+[ -f "$FLW_HOOK" ] && source "$FLW_HOOK"
+
 # With WineASIO, run through PipeWire's JACK layer so FL sees all channels.
 # WineASIO uses a fixed buffer; if PipeWire's quantum differs, FL plays at the
 # wrong speed (quantum/buffer, e.g. 2048/512 = 4x too slow). So pin quantum and

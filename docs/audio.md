@@ -65,7 +65,7 @@ systemctl --user restart wireplumber
 
 Downside: with some devices (e.g. the Logitech Brio) the microphone then also disappears from the device list of other applications.
 
-**Option B – disconnect in the launcher:** after start-up, remove every link to `FL64:in_*` that doesn't come from the audio interface.
+**Option B – disconnect at start-up:** remove every link to `FL64:in_*` that doesn't come from the audio interface. Put this into `~/.config/fl-studio-wine/pre-start.sh` (see [fixed routing](#fixed-routing-for-several-outputs)), inside the background block after FL's ports exist.
 
 ```bash
 IN="alsa_input.usb-<Interface>.pro-input-0"
@@ -77,7 +77,27 @@ pw-link -l \
 
 ## Fixed routing for several outputs
 
-With the PipeWire *Pro Audio* profile you can route FL outputs to specific interface channels (e.g. outputs 3/4 as a sidechain trigger for outboard gear). On start-up `pw-jack` often only connects outputs 1/2; a block in the launcher waits for FL's ports and creates the links with `pw-link`. Set the interface profile first:
+With the PipeWire *Pro Audio* profile you can route FL outputs to specific interface channels (e.g. outputs 3/4 as a sidechain trigger for outboard gear). On start-up `pw-jack` often only connects outputs 1/2, so the links have to be created once FL's ports exist.
+
+Such setup-specific steps belong in `~/.config/fl-studio-wine/pre-start.sh`. The launcher sources this file right before it starts FL, and `git pull` never touches it. Example for a 4-in/4-out interface:
+
+```bash
+# ~/.config/fl-studio-wine/pre-start.sh
+(
+    OUT="alsa_output.usb-<Interface>.pro-output-0"
+    IN="alsa_input.usb-<Interface>.pro-input-0"
+    for i in $(seq 1 80); do                      # wait up to ~40 s for FL's ports
+        pw-link -o 2>/dev/null | grep -qx 'FL64:out_4' && break
+        sleep 0.5
+    done
+    for n in 1 2 3 4; do
+        pw-link "FL64:out_$n" "${OUT}:playback_AUX$((n-1))" 2>/dev/null
+        pw-link "${IN}:capture_AUX$((n-1))" "FL64:in_$n" 2>/dev/null
+    done
+) &
+```
+
+Set the interface profile first:
 
 ```bash
 wpctl set-profile <device-id> <pro-audio-index>

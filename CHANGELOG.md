@@ -7,7 +7,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Findings from daily use (2026-10-21)
 - Troubleshooting: FL freezing after opening Gopher (WebView2 panel) and how to recover without losing the project.
 - Troubleshooting and plugin list: ZGameEditor Visualizer keeps FL's UI thread busy even with its window closed.
-- Plugin list: Rare (Analog Obsession, 2020 build) oscillates at 22,050 Hz with oversampling at 44.1 kHz - a plugin bug, with a workaround.
+- FL launcher: sources `~/.config/fl-studio-wine/pre-start.sh` before starting FL, for setup-specific steps such as fixed routing that `git pull` must not overwrite.
 - `tools/fl-perf-log.sh`: logs UI thread, process and wineserver CPU, context switches, memory and PipeWire xruns of a running FL.
 
 ### Support for all distributions (2026-10-16)
