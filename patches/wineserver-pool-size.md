@@ -124,7 +124,7 @@ sudo cp assets/wineserver-poolfix               /usr/bin/wineserver   # Wine 11.
 sudo cp assets/wineserver-poolfix-11.10-staging /usr/bin/wineserver   # wine-staging 11.10
 ```
 
-Der Launcher `start-flstudio.sh` enthält einen md5-Wächter, der beim Start warnt, falls `/usr/bin/wineserver` nicht (mehr) die Pool-Version ist.
+Der Launcher (`scripts/run-flstudio.sh`) warnt beim Start, falls `/usr/bin/wineserver` nicht (mehr) die Pool-Version ist – sobald der Pool-Fix per `./install.sh --pool-fix` eingerichtet wurde.
 
 ## Was es NICHT ist (ausgeschlossene Sackgassen)
 

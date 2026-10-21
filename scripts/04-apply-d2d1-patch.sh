@@ -1,65 +1,28 @@
 #!/bin/bash
 # ============================================================
-# Schritt 4: Gepatchte d2d1.dll anwenden
+# Step 4: install the patched d2d1.dll
 #
-# WARUM: Wine's d2d1.dll hat einen Stack-Overflow-Bug in
-# d2d_cdt_insert_segment() → FL Studio friert ein beim
-# Öffnen von Plugins wie Serum 2, Ozone 11, etc.
+# Wine's Direct2D triangulation can recurse/loop forever on some plugin
+# geometry -> FL Studio freezes when opening Serum 2, Ozone and others.
+# assets/d2d1.dll.patched is Wine 11.19's d2d1 with those bugs fixed
+# (source: patches/d2d1-geometry-fix.patch). Its Wine "builtin" marker at
+# offset 0x40 is zeroed so Wine loads it as a native DLL.
 #
-# DIE LÖSUNG: Eine vorkompilierte d2d1.dll aus Wine 11.19
-# mit dem Fix (Endlosschleifen/Rekursionen begrenzt) wird ins Prefix kopiert.
-# Die Wine-Builtin-Signatur bei Offset 0x40 wird auf 0x00
-# gesetzt, damit Wine sie als "native" DLL lädt.
+# Safe to run again any time (e.g. after a Wine update reset it).
 # ============================================================
-set -e
+set -euo pipefail
+source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/config.sh"
 
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PATCHED_DLL="$REPO_DIR/assets/d2d1.dll.patched"
+DLL="$REPO_DIR/assets/d2d1.dll.patched"
+[ -f "$DLL" ] || die "$DLL is missing - clone the full repository."
+[ -d "$SYS32" ] || die "No prefix at $WINEPREFIX - run step 2 first."
 
-echo "=== d2d1-Patch anwenden ==="
-echo "Prefix: $WINEPREFIX"
-echo ""
-
-# Prüfen ob gepatchte DLL vorhanden
-if [ ! -f "$PATCHED_DLL" ]; then
-    echo "FEHLER: $PATCHED_DLL nicht gefunden!"
-    echo "Stelle sicher, dass das Repository vollständig geklont wurde."
-    exit 1
+step "Installing the patched d2d1.dll"
+if [ -f "$SYS32/d2d1.dll" ] && ! cmp -s "$DLL" "$SYS32/d2d1.dll" && [ ! -f "$SYS32/d2d1.dll.wine-orig" ]; then
+    cp -a "$SYS32/d2d1.dll" "$SYS32/d2d1.dll.wine-orig"
+    ok "original kept as d2d1.dll.wine-orig"
 fi
-
-# Backup der Original-DLL (falls vorhanden)
-if [ -f "$SYS32/d2d1.dll" ]; then
-    cp -a "$SYS32/d2d1.dll" "$SYS32/d2d1.dll.bak-$(date +%Y%m%d)" 2>/dev/null || true
-    echo "[0/3] Backup der alten d2d1.dll erstellt."
-fi
-
-# 1) Gepatchte DLL kopieren
-cp -a "$PATCHED_DLL" "$SYS32/d2d1.dll"
-echo "[1/3] Gepatchte d2d1.dll nach system32 kopiert."
-
-# 2) Wine-Builtin-Signatur bei Offset 0x40 auf 0x00 setzen
-# → Wine erkennt die DLL nicht mehr als Builtin und lädt sie als Native
-python3 - "$SYS32/d2d1.dll" <<'PY'
-import sys
-p = sys.argv[1]
-with open(p, "r+b") as f:
-    f.seek(0x40)
-    f.write(b"\x00" * 16)
-print("[2/3] Wine-Builtin-Signatur bei Offset 0x40 auf 0x00 gesetzt.")
-PY
-
-# 3) DllOverride in der Registry setzen
-WINEPREFIX="$WINEPREFIX" wine reg add \
-    "HKCU\\Software\\Wine\\DllOverrides" \
-    /v d2d1 /d "native,builtin" /f >/dev/null 2>&1
-echo "[3/3] Registry: d2d1 = native,builtin"
-
-echo ""
-echo "Verifizierung:"
-echo "  MD5:    $(md5sum "$SYS32/d2d1.dll" | cut -d' ' -f1)"
-echo "  Erwartet: fd197f30b36451714e5fc5a7afc148c9"
-echo "  Größe:  $(du -sh "$SYS32/d2d1.dll" | cut -f1)"
-echo ""
-echo "=== d2d1-Patch erfolgreich angewendet! ==="
-echo "=== Fertig! Weiter mit: bash scripts/05-install-launchers.sh ==="
+cp "$DLL" "$SYS32/d2d1.dll"
+WINEDEBUG=-all wine reg add 'HKCU\Software\Wine\DllOverrides' /v d2d1 /d native,builtin /f >/dev/null 2>&1
+ok "d2d1.dll installed, override d2d1 = native,builtin (md5 $(md5sum "$SYS32/d2d1.dll" | cut -c1-8))"

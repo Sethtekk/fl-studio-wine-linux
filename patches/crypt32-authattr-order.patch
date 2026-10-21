@@ -1,0 +1,78 @@
+--- dlls/crypt32/msg.c	2026-10-16 21:38:56.493844591 +0200
++++ dlls/crypt32/msg.c	2026-10-16 21:38:56.504119654 +0200
+@@ -1103,6 +1103,57 @@
+     Verify
+ } SignOrVerify;
+ 
++/* A signature covers the authenticated attributes exactly as the signer
++ * encoded them. Re-encoding them as PKCS_ATTRIBUTES sorts them (DER SET OF),
++ * which changes the hash for signers that don't emit them sorted - e.g. the
++ * Authenticode signatures of FL Studio 26.1.7. Windows accepts those, so
++ * verification encodes them in their original order.
++ */
++static BOOL CRYPT_EncodeAttributesInOrder(const CRYPT_ATTRIBUTES *attrs,
++ BYTE **encoded, DWORD *size)
++{
++    BYTE **items;
++    DWORD *sizes, i, n, len = 0, lenBytes;
++    BOOL ret = TRUE;
++
++    if (!(items = CryptMemAlloc(attrs->cAttr * (sizeof(*items) + sizeof(*sizes)))))
++        return FALSE;
++    sizes = (DWORD *)(items + attrs->cAttr);
++    for (n = 0; ret && n < attrs->cAttr; n++)
++    {
++        ret = CryptEncodeObjectEx(X509_ASN_ENCODING, PKCS_ATTRIBUTE,
++         &attrs->rgAttr[n], CRYPT_ENCODE_ALLOC_FLAG, NULL, &items[n], &sizes[n]);
++        if (ret)
++            len += sizes[n];
++        else
++            break;
++    }
++    if (ret)
++    {
++        CRYPT_EncodeLen(len, NULL, &lenBytes);
++        *size = 1 + lenBytes + len;
++        if ((*encoded = LocalAlloc(0, *size)))
++        {
++            BYTE *out = *encoded;
++
++            *out++ = ASN_CONSTRUCTOR | ASN_SETOF;
++            CRYPT_EncodeLen(len, out, &lenBytes);
++            out += lenBytes;
++            for (i = 0; i < n; i++)
++            {
++                memcpy(out, items[i], sizes[i]);
++                out += sizes[i];
++            }
++        }
++        else
++            ret = FALSE;
++    }
++    for (i = 0; i < n; i++)
++        LocalFree(items[i]);
++    CryptMemFree(items);
++    return ret;
++}
++
+ static BOOL CSignedMsgData_UpdateAuthenticatedAttributes(
+  CSignedMsgData *msg_data, SignOrVerify flag)
+ {
+@@ -1136,9 +1187,14 @@
+                 LPBYTE encodedAttrs;
+                 DWORD size;
+ 
+-                ret = CryptEncodeObjectEx(X509_ASN_ENCODING, PKCS_ATTRIBUTES,
+-                 &msg_data->info->rgSignerInfo[i].AuthAttrs,
+-                 CRYPT_ENCODE_ALLOC_FLAG, NULL, &encodedAttrs, &size);
++                if (flag == Verify)
++                    ret = CRYPT_EncodeAttributesInOrder(
++                     &msg_data->info->rgSignerInfo[i].AuthAttrs, &encodedAttrs,
++                     &size);
++                else
++                    ret = CryptEncodeObjectEx(X509_ASN_ENCODING, PKCS_ATTRIBUTES,
++                     &msg_data->info->rgSignerInfo[i].AuthAttrs,
++                     CRYPT_ENCODE_ALLOC_FLAG, NULL, &encodedAttrs, &size);
+                 if (ret)
+                 {
+                     ret = CryptHashData(

@@ -1,0 +1,30 @@
+name: Bug report
+description: Something doesn't work (installer, FL Studio, a plugin, audio, Splice)
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `bash scripts/doctor.sh`
+      description: Run it in the repository folder and paste everything.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: fl
+    attributes:
+      label: FL Studio version
+      placeholder: e.g. 2025 (25.2.4) / 2026 (26.1.7)
+  - type: textarea
+    id: log
+    attributes:
+      label: Terminal output
+      description: Start FL with `flstudio-wine` from a terminal and paste the last lines (or the installer output).
+      render: text

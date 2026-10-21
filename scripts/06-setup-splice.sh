@@ -1,64 +1,35 @@
 #!/bin/bash
 # ============================================================
-# Schritt 6: Splice-Konfiguration reparieren
+# Step 6 (optional): Splice desktop app
 #
-# Splice hat zwei bekannte Probleme unter Wine:
-# 1. "Conveyor Migration" hängt beim Start → UI öffnet sich nicht
-# 2. Service Worker Cache kann korrumpiert werden → Renderer friert ein
+#   bash scripts/06-setup-splice.sh [~/Downloads/SpliceSetup.exe]
 #
-# Dieses Script behebt beide Probleme.
+# Installs Splice into the FL prefix (if an installer is given), clears
+# caches that are known to get corrupted under Wine and creates the
+# "Splice (Wine)" launcher. The launcher itself keeps Splice healthy
+# (see scripts/run-splice.sh: Conveyor migration off, appState repair).
 # ============================================================
-set -e
+set -euo pipefail
+source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/config.sh"
 
-APPSTATE="$SPLICE_SETTINGS/appState.json"
-
-echo "=== Splice-Konfiguration reparieren ==="
-
-if [ ! -f "$APPSTATE" ]; then
-    echo "appState.json nicht gefunden – Splice noch nicht installiert?"
-    echo "Installiere Splice zuerst, dann führe dieses Script erneut aus."
-    exit 1
+step "Setting up Splice"
+if [ -n "${1:-}" ]; then
+    [ -f "$1" ] || die "Installer not found: $1"
+    info "Running the Splice installer - log in when the window appears, then close Splice."
+    WINEDEBUG=-all wine "$1" || true
+    wineserver -w
 fi
+[ -f "$USERPROFILE/AppData/Local/splice/Splice.exe" ] \
+    || die "Splice is not installed. Download SpliceSetup.exe from splice.com and pass it to this script."
 
-# Backup
-cp "$APPSTATE" "${APPSTATE}.bak-$(date +%Y%m%d)"
-echo "[1/3] Backup von appState.json erstellt."
-
-# Conveyor-Migration deaktivieren + Fenster-Zustand zurücksetzen
-python3 - "$APPSTATE" <<'PY'
-import json, sys
-p = sys.argv[1]
-with open(p) as f:
-    state = json.load(f)
-
-# Verhindert Auto-Migration zu Conveyor (hängt unter Wine)
-state["upgradeState"] = None
-
-# Verhindert Fehler beim Wiederherstellen des Fenster-Zustands
-if "windows" in state and "legacy" in state.get("windows", {}):
-    state["windows"]["legacy"]["isOpen"] = False
-
-with open(p, "w") as f:
-    json.dump(state, f, indent=2)
-print("  upgradeState = null")
-print("  legacy.isOpen = false")
-PY
-echo "[2/3] appState.json konfiguriert."
-
-# Service Worker Cache löschen (kann korrumpiert sein)
-for dir in "Service Worker" "blob_storage" "Session Storage" "Code Cache"; do
-    if [ -d "$SPLICE_SETTINGS/$dir" ]; then
-        rm -rf "$SPLICE_SETTINGS/$dir"
-        echo "  $dir/ gelöscht"
-    fi
+pkill -9 -f 'Local\\splice\\' 2>/dev/null || true
+# Corrupted service-worker databases freeze the renderer under Wine
+for d in "Service Worker" "blob_storage" "Code Cache"; do
+    rm -rf "${SPLICE_SETTINGS:?}/$d"
 done
-rm -f "$SPLICE_SETTINGS/lockfile" 2>/dev/null || true
-echo "[3/3] Caches geleert."
+rm -f "$SPLICE_SETTINGS/lockfile"
+ok "caches cleared"
 
-echo ""
-echo "=== Splice-Konfiguration repariert! ==="
-echo "Starte Splice jetzt: ~/start-splice.sh"
-echo ""
-echo "Hinweis: Beim ersten Start musst du dich in Splice einloggen."
-echo "Das Fenster erscheint nach ca. 5-10 Sekunden."
+bash "$(dirname "$0")/05-install-launchers.sh" >/dev/null
+ok "launcher: Splice (Wine)  /  command: splice-wine"

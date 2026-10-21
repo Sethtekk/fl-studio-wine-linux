@@ -7,11 +7,11 @@
 | `d2d1.dll` | `$WINEPREFIX/drive_c/windows/system32/` | bleibt erhalten; der Launcher stellt sie bei Abweichung wieder her |
 | `wineserver` (Pool-Fix) | `/usr/bin/wineserver` | wird überschrieben → Hook bzw. Wartungsdienst spielt den Fix wieder ein |
 | Registry (`UseEGL`, `DllOverrides`) | Prefix | bleibt erhalten |
-| Launcher | `~/start-flstudio.sh` | bleibt erhalten |
+| Launcher | `~/.local/bin/flstudio-wine` → `scripts/run-flstudio.sh` | bleibt erhalten; `git pull` aktualisiert ihn |
 
-## Update-Automatik
+## Update-Automatik (nur Arch, optional)
 
-Einmalig installieren:
+Der Pool-Fix ist nur bei sehr großen Projekten nötig (Fehler 1411). Einmalig installieren:
 
 ```bash
 sudo bash scripts/install-fl-wine-automation.sh          # --remove zum Entfernen

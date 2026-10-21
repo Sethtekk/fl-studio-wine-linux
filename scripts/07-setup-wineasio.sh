@@ -1,113 +1,113 @@
 #!/bin/bash
 # ============================================================
-# Schritt 7: WineASIO einrichten – alle Eingänge in FL Studio
-# ============================================================
-# Voraussetzung: wineasio-Paket installiert (pacman -S wineasio)
+# Step 7 (optional): WineASIO – low latency and all channels of
+# your audio interface in FL Studio
 #
-# Problem: Wine's ASIO-Emulation (FL Studio ASIO) gibt immer
-# nur 2 Kanäle zurück (WASAPI-Einschränkung). WineASIO
-# überbrückt Wine direkt zu PipeWire/JACK → alle Hardware-
-# Eingänge werden sichtbar.
+# Without it Wine offers FL only 2 inputs (WASAPI). WineASIO talks to
+# PipeWire's JACK layer directly. The FL launcher then pins PipeWire's
+# quantum to WineASIO's buffer size while FL runs; a mismatch makes
+# playback run at the wrong speed (e.g. 4x too slow).
+#
+# If no WineASIO is installed, it is built from source (needs a C compiler,
+# Wine's winegcc and the JACK headers - installed here for your distro).
+#
+#   ASIO_INPUTS=4 ASIO_OUTPUTS=4 ASIO_BUFFER=512 bash scripts/07-setup-wineasio.sh
 # ============================================================
-set -e
+set -euo pipefail
+source "$(dirname "$0")/lib/common.sh"
 source "$(dirname "$0")/config.sh"
 
-echo "=== WineASIO Setup ==="
+INPUTS="${ASIO_INPUTS:-16}"
+OUTPUTS="${ASIO_OUTPUTS:-16}"
+BUFSIZE="${ASIO_BUFFER:-512}"    # 512 @ 48 kHz = 10.7 ms
+WINEASIO_VERSION="${WINEASIO_VERSION:-v1.3.0}"
 
-# ── 1. Paket prüfen ─────────────────────────────────────────
-if ! pacman -Q wineasio &>/dev/null; then
-    echo "FEHLER: wineasio ist nicht installiert."
-    echo "Bitte installieren: sudo pacman -S wineasio"
-    exit 1
+step "Setting up WineASIO"
+
+# Wine's library dir = the one that holds x86_64-unix/ntdll.so
+find_wine_libdir() {
+    local w d
+    w="$(readlink -f "$(type -P wine)")"
+    for d in "$(dirname "$w")/../lib/wine" "$(dirname "$w")/../lib64/wine" \
+             /usr/lib/wine /usr/lib64/wine /usr/lib/x86_64-linux-gnu/wine \
+             /opt/wine-staging/lib/wine /opt/wine-staging/lib64/wine; do
+        [ -f "$d/x86_64-unix/ntdll.so" ] && { readlink -f "$d"; return; }
+    done
+}
+LIBDIR="$(find_wine_libdir)"
+[ -n "$LIBDIR" ] || die "Could not find Wine's library directory."
+info "Wine libraries: $LIBDIR"
+
+build_wineasio() {
+    detect_distro
+    info "Installing build dependencies ..."
+    case "$DISTRO_FAMILY" in
+        arch)   as_root pacman -S --needed --noconfirm base-devel git pipewire-jack ;;
+        debian) as_root apt-get install -y build-essential git libjack-jackd2-dev wine-staging-dev ;;   # WineHQ package
+        fedora) as_root dnf install -y gcc make git wine-devel pipewire-jack-audio-connection-kit-devel ;;
+        suse)   as_root zypper --non-interactive install gcc make git wine-devel pipewire-libjack-0_3-devel ;;
+        *)      die "Install a C compiler, git, winegcc (wine development package) and the JACK headers, then run this again." ;;
+    esac
+    local src; src="$(mktemp -d)"
+    git clone --quiet --depth 1 --branch "$WINEASIO_VERSION" https://github.com/wineasio/wineasio.git "$src/wineasio"
+    info "Building WineASIO $WINEASIO_VERSION ..."
+    # WineHQ packages keep winegcc/winebuild in /opt/wine-*/bin
+    PATH="/opt/wine-staging/bin:/opt/wine-devel/bin:/opt/wine-stable/bin:$PATH" \
+        make -C "$src/wineasio" 64 >"$src/build.log" 2>&1 || { tail -20 "$src/build.log"; die "WineASIO build failed (log above)."; }
+    as_root install -m 644 "$src/wineasio/build64/wineasio64.dll"    "$LIBDIR/x86_64-windows/wineasio64.dll"
+    as_root install -m 755 "$src/wineasio/build64/wineasio64.dll.so" "$LIBDIR/x86_64-unix/wineasio64.dll.so"
+    rm -rf "$src"
+    ok "WineASIO built and installed into $LIBDIR"
+}
+
+if [ ! -f "$LIBDIR/x86_64-unix/wineasio64.dll.so" ]; then
+    detect_distro
+    if [ "$DISTRO_FAMILY" = arch ] && { command -v paru >/dev/null || command -v yay >/dev/null; }; then
+        helper="$(command -v paru || command -v yay)"
+        info "WineASIO comes from the AUR: $helper -S wineasio"
+        "$helper" -S --needed wineasio
+    else
+        ask "WineASIO is not installed. Build it from source now?" y || die "Cancelled."
+        build_wineasio
+    fi
 fi
-echo "[1/6] wineasio-Paket vorhanden."
+[ -f "$LIBDIR/x86_64-unix/wineasio64.dll.so" ] || die "WineASIO is still missing in $LIBDIR."
+ok "WineASIO found"
 
-# ── 2. Packaging-Bug-Fix: fehlender Symlink ─────────────────
-# Der Wine-Stub wineasio64.dll hat intern den DLL-Namen
-# "wineasio.dll" eingebaut. Wine sucht deshalb nach
-# wineasio.dll.so als Builtin-Library – diese existiert im
-# Paket aber nicht (nur wineasio64.dll.so). Ohne diesen
-# Symlink schlägt CoCreateInstance lautlos fehl.
-SO_DIR="/usr/lib/wine/x86_64-unix"
-if [ ! -e "$SO_DIR/wineasio.dll.so" ]; then
-    echo "[2/6] Symlink fehlt – sudo benötigt..."
-    sudo ln -s "$SO_DIR/wineasio64.dll.so" "$SO_DIR/wineasio.dll.so"
-    echo "[2/6] Symlink erstellt: wineasio.dll.so -> wineasio64.dll.so"
-else
-    echo "[2/6] Symlink bereits vorhanden."
+# The PE stub's internal name is "wineasio.dll", so Wine looks for
+# wineasio.dll.so - add that name, or CoCreateInstance fails silently.
+if [ ! -e "$LIBDIR/x86_64-unix/wineasio.dll.so" ]; then
+    as_root ln -s wineasio64.dll.so "$LIBDIR/x86_64-unix/wineasio.dll.so"
+    ok "compat link wineasio.dll.so -> wineasio64.dll.so"
 fi
 
-# ── 3. DLL in Prefix kopieren und registrieren ──────────────
-cp /usr/lib/wine/x86_64-windows/wineasio64.dll \
-   "$WINEPREFIX/drive_c/windows/system32/wineasio64.dll"
-cp /usr/lib/wine/x86_64-windows/wineasio64.dll \
-   "$WINEPREFIX/drive_c/windows/system32/wineasio.dll"
+cp "$LIBDIR/x86_64-windows/wineasio64.dll" "$SYS32/wineasio64.dll"
+cp "$LIBDIR/x86_64-windows/wineasio64.dll" "$SYS32/wineasio.dll"
+export WINEDEBUG=-all
+wine regsvr32 /s "$LIBDIR/x86_64-unix/wineasio64.dll.so" >/dev/null 2>&1 \
+    || wine regsvr32 /s wineasio64.dll >/dev/null 2>&1
+wine reg add 'HKCU\Software\Wine\DllOverrides' /v wineasio64 /d builtin /f >/dev/null 2>&1
+wine reg add 'HKCU\Software\Wine\DllOverrides' /v wineasio /d native,builtin /f >/dev/null 2>&1
+grep -qi wineasio "$WINEPREFIX/system.reg" || die "Registration failed (no WineASIO entry in system.reg)."
+ok "registered in the prefix"
 
-WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all \
-    wine regsvr32 /s /usr/lib/wine/x86_64-unix/wineasio64.dll.so
-echo "[3/6] WineASIO registriert (ASIO-Treiber + CLSID)."
-
-# ── 4. DLL-Overrides setzen ─────────────────────────────────
-WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all \
-    wine reg add "HKCU\Software\Wine\DllOverrides" \
-    /v wineasio64 /d "builtin" /f 2>/dev/null
-WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all \
-    wine reg add "HKCU\Software\Wine\DllOverrides" \
-    /v wineasio /d "native,builtin" /f 2>/dev/null
-echo "[4/6] DLL-Overrides gesetzt (wineasio64=builtin)."
-
-# ── 5. WineASIO konfigurieren ───────────────────────────────
-# Anzahl Ein-/Ausgänge ans Interface anpassen.
-# UMC404HD: 4 Eingänge, 4 Ausgänge.
-# Für andere Interfaces die Werte entsprechend ändern.
-INPUTS=4
-OUTPUTS=4
-BUFSIZE=256   # Samples (Latenz: ~5.8ms @ 44100 Hz)
-
-cat > /tmp/wineasio-setup.reg << EOF
+reg="$(mktemp --suffix=.reg)"
+cat > "$reg" <<EOF
 REGEDIT4
 
-[HKEY_CURRENT_USER\Software\Wine\WineASIO]
+[HKEY_CURRENT_USER\\Software\\Wine\\WineASIO]
 "Autostart server"=dword:00000000
 "Connect to hardware"=dword:00000001
 "Fixed buffersize"=dword:00000001
-"Number of inputs"=dword:$(printf '%08x' $INPUTS)
-"Number of outputs"=dword:$(printf '%08x' $OUTPUTS)
-"Preferred buffersize"=dword:$(printf '%08x' $BUFSIZE)
+"Number of inputs"=dword:$(printf '%08x' "$INPUTS")
+"Number of outputs"=dword:$(printf '%08x' "$OUTPUTS")
+"Preferred buffersize"=dword:$(printf '%08x' "$BUFSIZE")
 EOF
+wine regedit "$reg" >/dev/null 2>&1
+rm -f "$reg"
+wineserver -w
+ok "$INPUTS inputs / $OUTPUTS outputs / buffer $BUFSIZE samples"
 
-WINEPREFIX="$WINEPREFIX" WINEDEBUG=-all \
-    wine regedit /tmp/wineasio-setup.reg 2>/dev/null
-rm /tmp/wineasio-setup.reg
-echo "[5/6] WineASIO konfiguriert: $INPUTS In / $OUTPUTS Out / ${BUFSIZE} Samples Buffer."
-
-# ── 6. PipeWire auf 44100 Hz konfigurieren ──────────────────
-# WineASIO meldet FL Studio die JACK-Sample-Rate. PipeWire
-# muss auf 44100 Hz laufen damit kein Rate-Mismatch entsteht.
-PW_CONF_DIR="$HOME/.config/pipewire/pipewire.conf.d"
-mkdir -p "$PW_CONF_DIR"
-cat > "$PW_CONF_DIR/10-sample-rate.conf" << 'EOF'
-context.properties = {
-    default.clock.rate          = 44100
-    default.clock.allowed-rates = [ 44100 48000 ]
-    default.clock.quantum       = 1024
-    default.clock.min-quantum   = 32
-    default.clock.max-quantum   = 2048
-}
-EOF
-echo "[6/6] PipeWire auf 44100 Hz konfiguriert."
-echo "      Neustart nötig: systemctl --user restart pipewire pipewire-pulse wireplumber"
-
-# ── Abschluss ────────────────────────────────────────────────
-echo ""
-echo "=== WineASIO Setup abgeschlossen ==="
-echo ""
-echo "Nächste Schritte:"
-echo "  1. PipeWire neu starten:"
-echo "     systemctl --user restart pipewire pipewire-pulse wireplumber"
-echo "  2. FL Studio starten: ~/start-flstudio.sh"
-echo "  3. In FL Studio: Options → Audio Settings → ASIO → WineASIO"
-echo "  4. Alle $INPUTS Eingänge deines Interfaces sind jetzt verfügbar."
-echo ""
-echo "HINWEIS: Input-Monitoring (grünes Lautsprecher-Symbol im Mixer)"
-echo "  deaktivieren um Rückkopplungen zu vermeiden!"
+echo
+info "In FL Studio: Options → Audio Settings → Device → WineASIO"
+info "The launcher pins PipeWire's quantum to $BUFSIZE while FL runs."

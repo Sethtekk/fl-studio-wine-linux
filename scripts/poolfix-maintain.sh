@@ -36,8 +36,8 @@ notify() {   # Desktop-Hinweis, falls der Benutzer angemeldet ist
 in_manifest() { awk '{print $1}' "$MANIFEST" 2>/dev/null | grep -qx "$1"; }
 
 wait_for_pacman() {
-    local i
-    for i in $(seq 1 180); do
+    local _
+    for _ in $(seq 1 180); do
         [ -e /var/lib/pacman/db.lck ] || return 0
         sleep 10
     done
@@ -46,8 +46,8 @@ wait_for_pacman() {
 }
 
 wait_for_network() {
-    local i
-    for i in $(seq 1 20); do
+    local _
+    for _ in $(seq 1 20); do
         curl -fsI --connect-timeout 10 https://dl.winehq.org/ >/dev/null 2>&1 && return 0
         sleep 30
     done

@@ -5,12 +5,11 @@ Ohne ASIO-Treiber stellt Wine FL Studio nur zwei Eingänge über WASAPI zur Verf
 ## Einrichtung
 
 ```bash
-sudo pacman -S wineasio
-bash scripts/07-setup-wineasio.sh
-systemctl --user restart pipewire pipewire-pulse wireplumber
+bash scripts/07-setup-wineasio.sh     # installiert/baut WineASIO bei Bedarf selbst
+# andere Werte: ASIO_INPUTS=4 ASIO_OUTPUTS=4 ASIO_BUFFER=512 bash scripts/07-setup-wineasio.sh
 ```
 
-Das Skript registriert WineASIO im Prefix, setzt Ein-/Ausgangszahl und Buffergröße und legt `~/.config/pipewire/pipewire.conf.d/10-sample-rate.conf` an (44,1 kHz).
+Das Skript installiert WineASIO (Arch: AUR, sonst Bau aus dem Quellcode), registriert es im Prefix und setzt Ein-/Ausgangszahl und Buffergröße (Standard 16/16, 512 Samples). Der Launcher `flstudio-wine` startet FL dann über `pw-jack` und fixiert das PipeWire-Quantum auf die Buffergröße (siehe unten).
 
 In FL: *Options → Audio Settings → Device → WineASIO*. Input-Monitoring im Mixer deaktivieren, um Rückkopplungen zu vermeiden.
 
@@ -33,26 +32,13 @@ grep -i buffersize "$WINEPREFIX/user.reg"       # WineASIO-Buffer
 
 Gleiche Tonhöhe → Quantum/Buffer-Mismatch. Veränderte Tonhöhe → echtes Sample-Rate- oder Clock-Problem.
 
-**Lösung:** Rate und Quantum hart fixieren. Ein bloßer `max-quantum`-Deckel genügt nicht.
+**Lösung:** Rate und Quantum zur Laufzeit hart fixieren – das macht `flstudio-wine` automatisch beim Start und setzt es beim Beenden zurück. Ein bloßer `max-quantum`-Deckel genügt nicht, und `default.clock.force-*` in einer Konfigurationsdatei wird von PipeWire **nicht** übernommen (nur zur Laufzeit wirksam).
+
+Von Hand (Wert `0` hebt auf):
 
 ```bash
-cat > ~/.config/pipewire/pipewire.conf.d/20-wineasio-quantum.conf << 'EOF'
-# force-quantum muss der WineASIO-Buffergröße entsprechen
-context.properties = {
-    default.clock.rate          = 44100
-    default.clock.quantum       = 512
-    default.clock.force-rate    = 44100
-    default.clock.force-quantum = 512
-}
-EOF
-systemctl --user restart pipewire pipewire-pulse wireplumber
-```
-
-Ohne Neustart testen (Wert `0` hebt auf):
-
-```bash
-pw-metadata -n settings 0 clock.force-quantum 512
-pw-metadata -n settings 0 clock.force-rate    44100
+pw-metadata -n settings 0 clock.force-quantum 512     # = WineASIO-Buffergröße
+pw-metadata -n settings 0 clock.force-rate    48000   # = aktuelle Rate
 ```
 
 ## Webcam-Mikrofon auf FL-Eingang 1

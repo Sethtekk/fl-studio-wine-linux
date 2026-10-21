@@ -1,0 +1,19 @@
+name: Test report – it works on my system
+description: Tell us it runs on your distribution / GPU, so others know
+labels: [test-report]
+body:
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `bash scripts/doctor.sh`
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: fl
+    attributes:
+      label: FL Studio version
+  - type: textarea
+    id: notes
+    attributes:
+      label: Plugins / audio interface you use, anything you had to do differently
