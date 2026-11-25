@@ -42,7 +42,10 @@ The `fl-unfreeze` watchdog checks every 5 s whether FL's main thread is stuck in
 |---|---|
 | Stock Wine 11.19 | stack overflows and hangs in every block of 10,000 cases |
 | earlier patched DLL (Wine 11.9) | hangs in every block, first one at seed 940 |
-| current patched DLL | 240,000 cases without a failure (another 120,000 after the performance fix) |
+| patched DLL of 2026-10-13 | 240,000 cases without a failure (another 120,000 after the performance fix); later found to crash on seed 371,335 |
+| current patched DLL (2026-11-26) | seeds 0–460,000 without a failure |
+
+**Large regular paths** (`tools/d2d1_pathgen.py` + `tools/d2d1_runpath.exe`): unpatched Wine overflows the stack from `band 9500`, the 2026-10-13 DLL from `band 25000`; the current DLL closes all eight families at 10,000 vertices and `bandw` at 30,000.
 
 **Wine test suite** `dlls/d2d1/tests`: 17,475 tests, identical results for stock and patched (0 failures in a clean prefix).
 
@@ -155,4 +158,5 @@ This is a user report, not our measurement. With a second, unrelated system it i
 - Wait for the first real wine-staging update with a pre-build.
 - JUCE OpenGL plugins (Kickstart 2, Youlean, GrapHack, iZotope): pixel-format mechanism checked, interfaces not tested one by one in the test host.
 - Gopher freeze: identify the Win32 call behind the message loop; seen only once so far.
-- d2d1 upstream: patch split into five commits against Wine master, each built and tested (see [patches/d2d1-geometry-fix.md](../patches/d2d1-geometry-fix.md#upstream-submission-in-progress-2026-10-21)); still missing: regression tests from minimized fuzzer seeds, a reproducer for the `d2d_cdt_cut_edges` change, and the merge request itself.
+- d2d1 upstream: patch split into commits against Wine master, each built and tested (see [patches/d2d1-geometry-fix.md](../patches/d2d1-geometry-fix.md#upstream-submission-in-progress-2026-10-21-updated-2026-11-26)); the two fixes of 2026-11-26 still need to go into the upstream branch; missing: regression tests from minimized fuzzer seeds and the merge request itself.
+- The new d2d1 DLL (2026-11-26) still needs an FL session with Serum 2 (isolated tests only so far).

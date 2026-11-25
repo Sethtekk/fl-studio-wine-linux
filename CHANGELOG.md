@@ -4,6 +4,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### d2d1: two more crash fixes (2026-11-26)
+- d2d1: the edge walk in `d2d_cdt_cut_edges` no longer destroys an edge twice when degenerate geometry makes it cycle. The previous patch version crashed there (fuzzer seed 371,335) where unpatched Wine only returned `E_FAIL`; this affected the installed DLL too.
+- d2d1: `d2d_cdt_fixup` no longer recurses once per triangle, which overflowed the stack on large regular paths (two rows of ~25,000 vertices), even with the previous patch.
+- d2d1: the `d2d_cdt_cut_edges` recursion fix now has a reproducer on regular input (unpatched Wine crashes from ~9,500 vertices).
+- New `assets/d2d1.dll.patched` (MD5 `9b485ac9`); the launcher installs it into the prefix on the next start. Verified: fuzzer seeds 0–460,000 without a failure, fill pixel-identical to the previous DLL, Wine test suite unchanged.
+- `tools/d2d1_pathgen.py` (large regular path families) and `tools/d2d1_runpath.exe` (replays one path from a text file).
+
 ### Findings from daily use (2026-10-21)
 - d2d1 upstream submission prepared: five commits against Wine master, each built and tested; seed-by-seed mapping of fuzzer failures to the commit that fixes them (`patches/d2d1-geometry-fix.md`).
 - crypt32: the authenticated-attribute fix is upstream (Wine master after 11.20); noted in `scripts/build-crypt32-fix.sh`.

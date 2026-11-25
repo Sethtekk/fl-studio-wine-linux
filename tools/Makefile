@@ -7,13 +7,14 @@
 #   wine build/clap_guitest.exe "C:\\Program Files\\Common Files\\CLAP\\Diopser.clap" 10
 #   wine build/vst2_guitest.exe "C:\\VST\\CamelCrusher.dll" 10
 #   WINEDLLOVERRIDES=d2d1=n wine build/d2d1_fuzz.exe 1 10000
+#   ./d2d1_pathgen.py band 20000 > band.txt && WINEDLLOVERRIDES=d2d1=n wine build/d2d1_runpath.exe band.txt
 
 CC       := x86_64-w64-mingw32-gcc
 CXX      := x86_64-w64-mingw32-g++
 CLAP_INC ?= clap/include
 OUT      := build
 
-all: $(OUT)/clap_guitest.exe $(OUT)/vst2_guitest.exe $(OUT)/d2d1_fuzz.exe $(OUT)/d2d1_strokebench.exe
+all: $(OUT)/clap_guitest.exe $(OUT)/vst2_guitest.exe $(OUT)/d2d1_fuzz.exe $(OUT)/d2d1_strokebench.exe $(OUT)/d2d1_runpath.exe
 
 $(OUT):
 	mkdir -p $@
@@ -29,6 +30,9 @@ $(OUT)/d2d1_fuzz.exe: d2d1_fuzz.cpp | $(OUT)
 
 $(OUT)/d2d1_strokebench.exe: d2d1_strokebench.cpp | $(OUT)
 	$(CXX) -O2 -o $@ $< -ld2d1 -lole32 -luuid -lwindowscodecs -static
+
+$(OUT)/d2d1_runpath.exe: d2d1_runpath.cpp | $(OUT)
+	$(CXX) -O2 -o $@ $< -ld2d1 -static
 
 clean:
 	rm -rf $(OUT)
