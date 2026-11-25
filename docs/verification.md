@@ -158,5 +158,5 @@ This is a user report, not our measurement. With a second, unrelated system it i
 - Wait for the first real wine-staging update with a pre-build.
 - JUCE OpenGL plugins (Kickstart 2, Youlean, GrapHack, iZotope): pixel-format mechanism checked, interfaces not tested one by one in the test host.
 - Gopher freeze: identify the Win32 call behind the message loop; seen only once so far.
-- d2d1 upstream: patch split into commits against Wine master, each built and tested (see [patches/d2d1-geometry-fix.md](../patches/d2d1-geometry-fix.md#upstream-submission-in-progress-2026-10-21-updated-2026-11-26)); the two fixes of 2026-11-26 still need to go into the upstream branch; missing: regression tests from minimized fuzzer seeds and the merge request itself.
+- d2d1 upstream: patch split into commits against Wine master, each built and tested (see [patches/d2d1-geometry-fix.md](../patches/d2d1-geometry-fix.md#upstream-submission-in-progress-2026-10-21-updated-2026-11-26)); seven commits including regression tests, ordered so that no intermediate commit is worse than unpatched Wine; missing: the merge request itself and the Windows results of the new tests.
 - The new d2d1 DLL (2026-11-26) still needs an FL session with Serum 2 (isolated tests only so far).

@@ -101,11 +101,32 @@ With commit 2 applied, the fuzzer (seeds 0 to ~56,000) found only hangs; the 12 
 
 `E_FAIL` means the fill of that one geometry is dropped. Windows most likely returns `S_OK` for these paths, so regression tests for them will need `todo_wine`.
 
-**Update 2026-11-26:** commit 3 now has a reproducer (`band 9500`, regular input), and its walk detects a cycle by marking crossed edges (defect 3b) instead of counting to `edge_count` - the commit as listed above caused the double-destroy crash. A sixth commit makes `d2d_cdt_fixup()` iterative (defect 4b). Both are applied to this repository's patch already; the upstream branch gets them before submission.
+**Update 2026-11-26:** the upstream branch now has seven commits:
+
+1. `d2d1: Factor out d2d_cdt_find_vertex_edge().` (no functional change)
+2. `d2d1: Avoid unbounded recursion in d2d_cdt_cut_edges().` - iterative, with cycle detection by marking crossed edges (defect 3b); reproducer on regular input
+3. `d2d1: Avoid unbounded recursion in d2d_cdt_insert_segment().`
+4. `d2d1: Limit Bezier splitting in d2d_geometry_resolve_beziers().`
+5. `d2d1: Bound the face walk in d2d_cdt_fixup().`
+6. `d2d1: Avoid unbounded recursion in d2d_cdt_fixup().` (defect 4b)
+7. `d2d1/tests: Add tests for degenerate path geometries.`
+
+`cut_edges` comes before `insert_segment` on purpose: with the skip paths of `insert_segment` but without the cycle detection, fuzzer seed 371,335 crashes where unpatched Wine returns `E_FAIL`. In this order no intermediate commit is worse than unpatched Wine on any known case:
+
+| Case | Unpatched | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| seed 4855 (reduced) | crash | crash | crash | `S_OK` | `S_OK` | `S_OK` | `S_OK` |
+| `band 9500` | crash | crash | `S_OK` | `S_OK` | `S_OK` | `S_OK` | `S_OK` |
+| `band 25000` | crash | crash | crash | crash | crash | crash | `S_OK` |
+| seed 940 | hang | hang | hang | hang | hang | `E_FAIL` | `E_FAIL` |
+| seed 6819 | hang | hang | hang | hang | `S_OK` | `S_OK` | `S_OK` |
+| seed 371,335 | `E_FAIL` | `E_FAIL` | `E_FAIL` | `E_FAIL` | `E_FAIL` | `E_FAIL` | `E_FAIL` |
+
+Every commit builds without warnings. The tests (commit 7) close four reduced fuzzer paths (4855, 371,335, 6819, 940 - each reduced so that it fails exactly before the commit that fixes it) and one `band` path with 12,500 vertices, each in a thread with a fixed 1 MiB stack, so that a stack overflow becomes a test failure instead of a crashed test run (Wine never gives a thread less than 1 MiB). Checked: all pass with the full series (17,496 tests, 0 failures); without commit 6 the band test fails, without commit 4 the Bézier test hangs. The face-walk path gets `E_FAIL` on Wine and is marked `todo_wine`, assuming Windows returns `S_OK` - the Windows results of all five cases still have to be confirmed by the Wine test bot.
 
 Related upstream work: [MR !11421](https://gitlab.winehq.org/wine/wine/-/merge_requests/11421) (open since 2026-07-17) treats near-collinear quadratic Béziers as straight lines, which fixes the same kind of hang as commit 4 from the other side. Its test case (512 near-coincident quadratic Béziers) hangs in unpatched Wine and closes in ~3 s with this patch. The two changes don't conflict.
 
-Still open: regression tests from minimized seeds (the first one, from seed 4855, is down to two figures and seven segments) and the submission itself.
+Still open: author identity, Wine's policy on AI-assisted contributions, and the submission itself.
 
 ## Known remaining limitation
 
